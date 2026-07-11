@@ -236,7 +236,7 @@ def dagit(veri: dict) -> dict:
 
     # ── Çöz ──────────────────────────────────────────────────────
     solver  = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = 60.0  # 60 saniye limit
+    solver.parameters.max_time_in_seconds = 25.0
     solver.parameters.num_workers = 8              # çok thread
     solver.parameters.log_search_progress = False
 

@@ -124,6 +124,156 @@ def dagit(veri):
                 eksikler.append({"sinif": siniflar[g["sid"]].get("sinif_adi"),
                                  "ders": dersler[g["did"]].get("ders_adi"), "blok": g["boy"]})
 
+    # ── ASAMA 2: SA ile min/max günlük kısıt optimizasyonu ─────
+    if basarili and eksikler == []:
+        kalan = 260 - (time.time() - t0)
+        print(f"SA minmax optimizasyon: {round(kalan)}s", flush=True)
+        
+        # Mevcut konumu al
+        konum = {}
+        for g in gorevler:
+            for (gun, saat) in gid_adaylar[g["id"]]:
+                if solver.Value(x[(g["id"], gun, saat)]) == 1:
+                    konum[g["id"]] = (gun, saat); break
+        
+        # Hızlı lookup
+        sinif_saat = {}
+        ogrt_saat = {}
+        did_gun = {}
+        
+        def _ekle(g, gun, saat):
+            for b in range(g["boy"]):
+                sinif_saat[(g["sid"], gun, saat+b)] = g["id"]
+                if g["tc"]: ogrt_saat[(g["tc"], gun, saat+b)] = g["id"]
+            k2 = (g["sid"], g["did"], gun)
+            did_gun[k2] = did_gun.get(k2, 0) + 1
+        
+        def _kaldir(g, gun, saat):
+            for b in range(g["boy"]):
+                sinif_saat.pop((g["sid"], gun, saat+b), None)
+                if g["tc"]: ogrt_saat.pop((g["tc"], gun, saat+b), None)
+            k2 = (g["sid"], g["did"], gun)
+            did_gun[k2] = did_gun.get(k2, 1) - 1
+            if did_gun.get(k2, 0) <= 0: did_gun.pop(k2, None)
+        
+        def _ok(g, gun, saat):
+            k2 = kisitlar.get(g["tc"], {})
+            if g["tc"] and k2.get("bosGun") and int(k2["bosGun"]) == gun: return False
+            if g["tc"] and gun in [int(v) for v in k2.get("kapaliGunler", [])]: return False
+            ms = gun_bilgi.get(gun, 8)
+            if saat < 1 or saat + g["boy"] - 1 > ms: return False
+            if did_gun.get((g["sid"], g["did"], gun), 0) > 0: return False
+            for b in range(g["boy"]):
+                if (g["sid"], gun, saat+b) in sinif_saat: return False
+                if g["tc"] and (g["tc"], gun, saat+b) in ogrt_saat: return False
+            return True
+        
+        for g in gorevler:
+            if g["id"] in konum: _ekle(g, *konum[g["id"]])
+        
+        def _ceza_tc(tc, glist2):
+            k2 = kisitlar.get(tc, {})
+            min_g = int(k2.get("minGunlukSaat", 2))
+            max_g = int(k2.get("maxGunlukSaat", 8))
+            gs = {}
+            for g in glist2:
+                if g["id"] not in konum: continue
+                gun2, saat2 = konum[g["id"]]
+                if gun2 not in gs: gs[gun2] = set()
+                for b in range(g["boy"]): gs[gun2].add(saat2+b)
+            ceza2 = 0
+            hpen = 0
+            for gun2, s2 in gs.items():
+                n = len(s2)
+                if n < min_g: ceza2 += 500 * (min_g - n)
+                if n > max_g: ceza2 += 500 * (n - max_g)
+                if n >= 2:
+                    sr = sorted(s2)
+                    pen = sum(1 for i in range(sr[0], sr[-1]) if i not in s2)
+                    hpen += pen
+            if hpen > 2: ceza2 += 200 * (hpen - 2)
+            return ceza2
+        
+        tc_ceza = {tc: _ceza_tc(tc, glist2) for tc, glist2 in tc_g.items()}
+        toplam_c = sum(tc_ceza.values())
+        en_iyi_c = toplam_c
+        en_iyi_k = dict(konum)
+        tc_list2 = list(tc_g.keys())
+        sicaklik = 2000.0
+        soguma = 0.99999
+        iter2 = 0
+        son_log2 = time.time()
+        t_sa = time.time()
+        
+        print(f"SA baslangic ceza:{toplam_c}", flush=True)
+        
+        while time.time() - t_sa < kalan:
+            iter2 += 1
+            if time.time() - son_log2 > 25:
+                print(f"SA iter={iter2} ceza={toplam_c} T={sicaklik:.1f}", flush=True)
+                son_log2 = time.time()
+            if toplam_c == 0: break
+            
+            cezali = [(tc2, c2) for tc2, c2 in tc_ceza.items() if c2 > 0]
+            if random.random() < 0.8 and cezali:
+                total_c2 = sum(c2 for _, c2 in cezali)
+                r2 = random.random() * total_c2
+                cum2 = 0; tc2 = cezali[0][0]
+                for t2_, c2 in cezali:
+                    cum2 += c2
+                    if r2 <= cum2: tc2 = t2_; break
+            else:
+                tc2 = random.choice(tc_list2)
+            
+            glist3 = tc_g[tc2]
+            g2 = random.choice(glist3)
+            if g2["id"] not in konum: continue
+            eg2, es2 = konum[g2["id"]]
+            adaylar2 = gid_adaylar[g2["id"]]
+            if len(adaylar2) < 2: continue
+            yg2, ys2 = random.choice(adaylar2)
+            if (yg2, ys2) == (eg2, es2): continue
+            
+            _kaldir(g2, eg2, es2)
+            if not _ok(g2, yg2, ys2):
+                _ekle(g2, eg2, es2); continue
+            
+            eski_c2 = tc_ceza[tc2]
+            konum[g2["id"]] = (yg2, ys2)
+            _ekle(g2, yg2, ys2)
+            yeni_c2 = _ceza_tc(tc2, glist3)
+            delta2 = yeni_c2 - eski_c2
+            
+            if delta2 <= 0 or (sicaklik > 0.1 and random.random() < pow(2.718, -delta2/sicaklik)):
+                tc_ceza[tc2] = yeni_c2
+                toplam_c += delta2
+                if toplam_c < en_iyi_c:
+                    en_iyi_c = toplam_c
+                    en_iyi_k = dict(konum)
+            else:
+                konum[g2["id"]] = (eg2, es2)
+                _kaldir(g2, yg2, ys2)
+                _ekle(g2, eg2, es2)
+            
+            sicaklik *= soguma
+        
+        print(f"SA bitti:{iter2} iter en_iyi={en_iyi_c}", flush=True)
+        
+        # En iyi konumu slots'a yaz
+        if en_iyi_c < sum(_ceza_tc(tc2, glist2) for tc2, glist2 in tc_g.items()):
+            slots = {sid: {} for sid in siniflar}
+            for g in gorevler:
+                if g["id"] not in en_iyi_k: continue
+                gun3, saat3 = en_iyi_k[g["id"]]
+                sid3 = g["sid"]; ders3 = dersler[g["did"]]
+                if gun3 not in slots[sid3]: slots[sid3][gun3] = {}
+                for b in range(g["boy"]):
+                    slots[sid3][gun3][saat3+b] = {
+                        "ders_id": g["did"], "ders_adi": ders3.get("ders_adi",""),
+                        "kisa_ad": ders3.get("kisa_ad", ders3.get("ders_adi","")[:4]),
+                        "renk": ders3.get("renk","#1a6b47"), "ogretmen_tc": g["tc"],
+                        "ogretmenler": g["ogrtler"], "kilitli": False}
+
     print(f"Tamamlandi {round(time.time()-t0,1)}s eksik={len(eksikler)}", flush=True)
     return {"basari": basarili, "slots": slots, "eksikler": eksikler,
             "sure_sn": round(time.time()-t0, 2), "durum": solver.StatusName(durum), "seed": seed}

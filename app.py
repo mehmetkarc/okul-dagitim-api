@@ -16,6 +16,17 @@ def cors_headers(response):
 def saglik():
     return jsonify({"durum": "aktif", "versiyon": "1.0.0"})
 
+@app.route("/debug", methods=["POST"])
+def debug_veri():
+    """Frontend'den gelen kisitlari gosterir"""
+    import sys
+    veri = request.get_json(force=True)
+    kisitlar = veri.get("kisitlar", {})
+    ornek = {}
+    for i, (tc, k) in enumerate(list(kisitlar.items())[:5]):
+        ornek[tc[-6:]] = k
+    return jsonify({"kisit_sayisi": len(kisitlar), "ornek": ornek})
+
 @app.route("/dagit", methods=["POST", "OPTIONS"])
 def dagitim_yap():
     if request.method == "OPTIONS":

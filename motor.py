@@ -1,63 +1,9 @@
 """
-OkulYonetimSistemi - Ders Dagitim Motoru v10
-Sadece SA - CP-SAT yok, model kurma overhead yok.
-Hızlı başlar, 5 dakika optimize eder.
+OkulYonetimSistemi - Ders Dagitim Motoru v11
+Saf SA: rastgele baslangic + cakisma cezasi + pencere/minmax cezasi.
+CP-SAT yok, model kurma overhead yok. 5 dakika tam optimize.
 """
 import time, random, sys
-from ortools.sat.python import cp_model
-
-
-class Lookup:
-    def __init__(self, gun_bilgi):
-        self.sinif_saat = {}
-        self.ogrt_saat = {}
-        self.did_gun = {}
-        self.gun_bilgi = gun_bilgi
-
-    def ekle(self, g, gun, saat):
-        for b in range(g["boy"]):
-            self.sinif_saat[(g["sid"], gun, saat+b)] = g["id"]
-            if g["tc"]: self.ogrt_saat[(g["tc"], gun, saat+b)] = g["id"]
-        self.did_gun[(g["sid"], g["did"], gun)] = True
-
-    def kaldir(self, g, gun, saat):
-        for b in range(g["boy"]):
-            self.sinif_saat.pop((g["sid"], gun, saat+b), None)
-            if g["tc"]: self.ogrt_saat.pop((g["tc"], gun, saat+b), None)
-        self.did_gun.pop((g["sid"], g["did"], gun), None)
-
-    def ok(self, g, gun, saat, kisitlar):
-        k = kisitlar.get(g["tc"], {})
-        if g["tc"] and k.get("bosGun") and int(k["bosGun"]) == gun: return False
-        if g["tc"] and gun in [int(v) for v in k.get("kapaliGunler", [])]: return False
-        ms = self.gun_bilgi.get(gun, 8)
-        if saat < 1 or saat + g["boy"] - 1 > ms: return False
-        if self.did_gun.get((g["sid"], g["did"], gun)): return False
-        for b in range(g["boy"]):
-            if (g["sid"], gun, saat+b) in self.sinif_saat: return False
-            if g["tc"] and (g["tc"], gun, saat+b) in self.ogrt_saat: return False
-        return True
-
-
-def ceza_tc(tc, konum, glist, kisitlar):
-    k = kisitlar.get(tc, {})
-    min_g = int(k.get("minGunlukSaat", 2))
-    gs = {}
-    for g in glist:
-        if g["id"] not in konum: continue
-        gun, saat = konum[g["id"]]
-        if gun not in gs: gs[gun] = set()
-        for b in range(g["boy"]): gs[gun].add(saat+b)
-    ceza = 0
-    hpen = 0
-    for gun, s in gs.items():
-        n = len(s)
-        if n < min_g: ceza += 1000 * (min_g - n)
-        if n >= 2:
-            sr = sorted(s)
-            hpen += sum(1 for i in range(sr[0], sr[-1]) if i not in s)
-    if hpen > 2: ceza += 300 * (hpen - 2)
-    return ceza
 
 
 def dagit(veri):
@@ -106,108 +52,118 @@ def dagit(veri):
             for saat in range(1, gun_bilgi[gun] - g["boy"] + 2):
                 gid_adaylar[gid].append((gun, saat))
 
-    # ── ASAMA 1: CP-SAT sadece hard kisitlarla (20s limit) ──────
-    print("CP-SAT basliyor...", flush=True)
-    model = cp_model.CpModel()
-    x = {(g["id"], gun, saat): model.NewBoolVar(f"x_{g['id']}_{gun}_{saat}")
-         for g in gorevler for (gun, saat) in gid_adaylar[g["id"]]}
+    # Hızlı lookup yapıları
+    sinif_saat = {}   # (sid, gun, saat) -> gid
+    ogrt_saat  = {}   # (tc, gun, saat)  -> gid
+    did_gun    = {}   # (sid, did, gun)   -> count
 
+    def _ekle(g, gun, saat):
+        for b in range(g["boy"]):
+            sinif_saat[(g["sid"], gun, saat+b)] = g["id"]
+            if g["tc"]: ogrt_saat[(g["tc"], gun, saat+b)] = g["id"]
+        k = (g["sid"], g["did"], gun)
+        did_gun[k] = did_gun.get(k, 0) + 1
+
+    def _kaldir(g, gun, saat):
+        for b in range(g["boy"]):
+            sinif_saat.pop((g["sid"], gun, saat+b), None)
+            if g["tc"]: ogrt_saat.pop((g["tc"], gun, saat+b), None)
+        k = (g["sid"], g["did"], gun)
+        did_gun[k] = did_gun.get(k, 1) - 1
+        if did_gun[k] <= 0: del did_gun[k]
+
+    # Ceza fonksiyonu - tek bir görev için
+    def ceza_gorev(g, gun, saat):
+        ceza = 0
+        # Çakışmalar (hard)
+        for b in range(g["boy"]):
+            mevcut_s = sinif_saat.get((g["sid"], gun, saat+b))
+            if mevcut_s and mevcut_s != g["id"]: ceza += 2000
+            if g["tc"]:
+                mevcut_o = ogrt_saat.get((g["tc"], gun, saat+b))
+                if mevcut_o and mevcut_o != g["id"]: ceza += 2000
+        # Blok-gün (hard)
+        k = (g["sid"], g["did"], gun)
+        mevcut_bg = did_gun.get(k, 0)
+        if mevcut_bg > 0: ceza += 3000
+        return ceza
+
+    # Öğretmen günlük ceza
+    def ceza_tc_gun(tc, gun, konum, glist):
+        k = kisitlar.get(tc, {})
+        min_g = int(k.get("minGunlukSaat", 2))
+        max_g = int(k.get("maxGunlukSaat", 8))
+        saatler = set()
+        for g in glist:
+            if g["id"] not in konum: continue
+            gg, gs = konum[g["id"]]
+            if gg != gun: continue
+            for b in range(g["boy"]): saatler.add(gs+b)
+        n = len(saatler)
+        ceza = 0
+        if n == 0: return 0
+        if n < min_g: ceza += 500 * (min_g - n)
+        if n > max_g: ceza += 500 * (n - max_g)
+        if n >= 2:
+            sr = sorted(saatler)
+            pen = sum(1 for i in range(sr[0], sr[-1]) if i not in saatler)
+            if pen > 0: ceza += 150 * pen
+        return ceza
+
+    # Rastgele başlangıç yerleşimi
+    konum = {}
     for g in gorevler:
-        av = [x[(g["id"], gun, saat)] for (gun, saat) in gid_adaylar[g["id"]]]
-        if av: model.AddExactlyOne(av)
-
-    sid_did = {}
-    for g in gorevler: sid_did.setdefault((g["sid"], g["did"]), []).append(g)
-    for (sid, did), glist in sid_did.items():
-        if len(glist) < 2: continue
-        for gun in gunler:
-            gv = [x[(g["id"], ag, as_)] for g in glist
-                  for (ag, as_) in gid_adaylar[g["id"]] if ag == gun]
-            if gv: model.Add(sum(gv) <= 1)
-
-    sid_g = {}
-    for g in gorevler: sid_g.setdefault(g["sid"], []).append(g)
-    for sid, glist in sid_g.items():
-        for gun in gunler:
-            for saat in range(1, gun_bilgi[gun] + 1):
-                av = [x[(g["id"], ag, as_)] for g in glist
-                      for (ag, as_) in gid_adaylar[g["id"]]
-                      if ag == gun and as_ <= saat < as_ + g["boy"]]
-                if len(av) > 1: model.Add(sum(av) <= 1)
+        adaylar = gid_adaylar[g["id"]]
+        if adaylar:
+            gun, saat = random.choice(adaylar)
+            konum[g["id"]] = (gun, saat)
+            _ekle(g, gun, saat)
 
     tc_g = {}
     for g in gorevler:
         if g["tc"]: tc_g.setdefault(g["tc"], []).append(g)
-    for tc, glist in tc_g.items():
-        for gun in gunler:
-            for saat in range(1, gun_bilgi[gun] + 1):
-                av = [x[(g["id"], ag, as_)] for g in glist
-                      for (ag, as_) in gid_adaylar[g["id"]]
-                      if ag == gun and as_ <= saat < as_ + g["boy"]]
-                if len(av) > 1: model.Add(sum(av) <= 1)
 
-    solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = 20.0  # Kısa - sadece feasible bul
-    solver.parameters.num_workers = 8
-    solver.parameters.random_seed = seed
-    durum = solver.Solve(model)
-    t1 = time.time()
-    print(f"CP-SAT:{solver.StatusName(durum)} {round(t1-t0,1)}s", flush=True)
+    # Toplam cezayı hesapla
+    def toplam_ceza_hesapla():
+        c = 0
+        for gid, (gun, saat) in konum.items():
+            g = next(gg for gg in gorevler if gg["id"] == gid)
+            c += ceza_gorev(g, gun, saat)
+        for tc, glist in tc_g.items():
+            for gun in gunler:
+                c += ceza_tc_gun(tc, gun, konum, glist)
+        return c
 
-    if durum not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        return {"basari": False, "slots": {sid: {} for sid in siniflar},
-                "eksikler": [{"sinif": "?", "ders": "Cozum bulunamadi", "blok": 0}],
-                "sure_sn": round(t1-t0, 2), "durum": solver.StatusName(durum)}
-
-    # Başlangıç konumunu al
-    konum = {}
-    lkp = Lookup(gun_bilgi)
-    for g in gorevler:
-        for (gun, saat) in gid_adaylar[g["id"]]:
-            if solver.Value(x[(g["id"], gun, saat)]) == 1:
-                konum[g["id"]] = (gun, saat)
-                lkp.ekle(g, gun, saat)
-                break
-
-    # ── ASAMA 2: SA ile min/max + pencere optimizasyonu ─────────
-    kalan = 310 - (time.time() - t0)
-    print(f"SA: {round(kalan)}s", flush=True)
-
-    tc_list = list(tc_g.keys())
-    tc_ceza = {tc: ceza_tc(tc, konum, tc_g[tc], kisitlar) for tc in tc_list}
-    toplam = sum(tc_ceza.values())
+    toplam = toplam_ceza_hesapla()
     en_iyi = toplam
     en_iyi_konum = dict(konum)
 
     print(f"SA baslangic ceza:{toplam}", flush=True)
 
-    sicaklik = 2000.0
-    soguma = 0.99999
+    sicaklik = 5000.0
+    soguma = 0.99998
     iterasyon = 0
     son_log = time.time()
-    t_sa = time.time()
+    gorev_listesi = list(gorevler)
 
-    while time.time() - t_sa < kalan:
+    while time.time() - t0 < 300:
         iterasyon += 1
         if time.time() - son_log > 20:
             print(f"SA iter={iterasyon} ceza={toplam} T={sicaklik:.1f}", flush=True)
             son_log = time.time()
         if toplam == 0: break
 
-        # Önce cezalıya odaklan
-        cezali = [(tc, c) for tc, c in tc_ceza.items() if c > 0]
-        if random.random() < 0.8 and cezali:
-            total_c = sum(c for _, c in cezali)
-            r = random.random() * total_c
-            cum = 0; tc = cezali[0][0]
-            for t_, c in cezali:
-                cum += c
-                if r <= cum: tc = t_; break
+        # Rastgele görev seç - cezalıya öncelik ver
+        if random.random() < 0.7:
+            # Çakışması veya cezası olan görev seç
+            g = random.choice(gorev_listesi)
+            gun0, saat0 = konum.get(g["id"], (0,0))
+            if gun0 and ceza_gorev(g, gun0, saat0) == 0:
+                # Rastgele başka biri
+                g = random.choice(gorev_listesi)
         else:
-            tc = random.choice(tc_list)
+            g = random.choice(gorev_listesi)
 
-        glist = tc_g[tc]
-        g = random.choice(glist)
         if g["id"] not in konum: continue
         eg, es = konum[g["id"]]
         adaylar = gid_adaylar[g["id"]]
@@ -215,40 +171,69 @@ def dagit(veri):
         yg, ys = random.choice(adaylar)
         if (yg, ys) == (eg, es): continue
 
-        lkp.kaldir(g, eg, es)
-        if not lkp.ok(g, yg, ys, kisitlar):
-            lkp.ekle(g, eg, es); continue
+        # Ceza farkını hesapla
+        _kaldir(g, eg, es)
+        eski_c = ceza_gorev(g, eg, es)  # eski pozisyondaki ceza (zaten kaldırıldı, 0 olur)
+        yeni_c = ceza_gorev(g, yg, ys)
 
-        eski_c = tc_ceza[tc]
-        konum[g["id"]] = (yg, ys)
-        lkp.ekle(g, yg, ys)
-        yeni_c = ceza_tc(tc, konum, glist, kisitlar)
-        delta = yeni_c - eski_c
+        # TC günlük ceza farkı
+        tc = g["tc"]
+        if tc:
+            tc_eski_eg = ceza_tc_gun(tc, eg, konum, tc_g[tc])
+            tc_eski_yg = ceza_tc_gun(tc, yg, konum, tc_g[tc])
+            konum[g["id"]] = (yg, ys)
+            _ekle(g, yg, ys)
+            tc_yeni_eg = ceza_tc_gun(tc, eg, konum, tc_g[tc])
+            tc_yeni_yg = ceza_tc_gun(tc, yg, konum, tc_g[tc])
+            delta = (yeni_c - eski_c) + (tc_yeni_eg - tc_eski_eg) + (tc_yeni_yg - tc_eski_yg)
+        else:
+            konum[g["id"]] = (yg, ys)
+            _ekle(g, yg, ys)
+            delta = yeni_c - eski_c
 
-        if delta <= 0 or (sicaklik > 0.01 and random.random() < pow(2.718, -delta/sicaklik)):
-            tc_ceza[tc] = yeni_c
+        if delta <= 0 or (sicaklik > 0.1 and random.random() < pow(2.718, -delta/sicaklik)):
             toplam += delta
             if toplam < en_iyi:
                 en_iyi = toplam
                 en_iyi_konum = dict(konum)
         else:
+            # Geri al
+            _kaldir(g, yg, ys)
             konum[g["id"]] = (eg, es)
-            lkp.kaldir(g, yg, ys)
-            lkp.ekle(g, eg, es)
+            _ekle(g, eg, es)
 
         sicaklik *= soguma
 
     print(f"SA bitti:{iterasyon} iter en_iyi={en_iyi}", flush=True)
-    konum = en_iyi_konum
+
+    # En iyi sonucu uygula
+    # Lookup'ı sıfırla ve en iyi konumu kur
+    sinif_saat.clear(); ogrt_saat.clear(); did_gun.clear()
+    for g in gorevler:
+        if g["id"] in en_iyi_konum:
+            gun, saat = en_iyi_konum[g["id"]]
+            _ekle(g, gun, saat)
 
     # Sonucu yaz
     slots = {sid: {} for sid in siniflar}
     eksikler = []
     for g in gorevler:
-        if g["id"] not in konum:
+        if g["id"] not in en_iyi_konum:
             eksikler.append({"sinif": siniflar[g["sid"]].get("sinif_adi"),
                              "ders": dersler[g["did"]].get("ders_adi"), "blok": g["boy"]}); continue
-        gun, saat = konum[g["id"]]
+        gun, saat = en_iyi_konum[g["id"]]
+        # Çakışma kontrolü - hâlâ çakışma varsa eksik say
+        cakisma = False
+        for b in range(g["boy"]):
+            occ = sinif_saat.get((g["sid"], gun, saat+b))
+            if occ and occ != g["id"]: cakisma=True; break
+            if g["tc"]:
+                occ2 = ogrt_saat.get((g["tc"], gun, saat+b))
+                if occ2 and occ2 != g["id"]: cakisma=True; break
+        if cakisma:
+            eksikler.append({"sinif": siniflar[g["sid"]].get("sinif_adi"),
+                             "ders": dersler[g["did"]].get("ders_adi"), "blok": g["boy"]}); continue
+
         sid = g["sid"]; ders = dersler[g["did"]]
         if gun not in slots[sid]: slots[sid][gun] = {}
         for b in range(g["boy"]):
@@ -259,8 +244,8 @@ def dagit(veri):
 
     sure = time.time()-t0
     print(f"Tamamlandi {round(sure,1)}s eksik={len(eksikler)}", flush=True)
-    return {"basari": True, "slots": slots, "eksikler": eksikler,
-            "sure_sn": round(sure,2), "durum": solver.StatusName(durum), "seed": seed}
+    return {"basari": en_iyi==0, "slots": slots, "eksikler": eksikler,
+            "sure_sn": round(sure,2), "durum": "SA_OPTIMAL" if en_iyi==0 else "SA_FEASIBLE", "seed": seed}
 
 
 if __name__ == "__main__":

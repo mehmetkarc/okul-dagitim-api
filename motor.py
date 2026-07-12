@@ -185,8 +185,8 @@ def dagit(veri):
             hpen = 0
             for gun2, s2 in gs.items():
                 n = len(s2)
-                if n < min_g: ceza2 += 500 * (min_g - n)
-                if n > max_g: ceza2 += 500 * (n - max_g)
+                if n < min_g: ceza2 += 2000 * (min_g - n)  # Çok ağır - günde 1 ders kabul edilemez
+                if n > max_g: ceza2 += 1000 * (n - max_g)
                 if n >= 2:
                     sr = sorted(s2)
                     pen = sum(1 for i in range(sr[0], sr[-1]) if i not in s2)
@@ -199,8 +199,8 @@ def dagit(veri):
         en_iyi_c = toplam_c
         en_iyi_k = dict(konum)
         tc_list2 = list(tc_g.keys())
-        sicaklik = 2000.0
-        soguma = 0.99999
+        sicaklik = 5000.0
+        soguma = 0.999995
         iter2 = 0
         son_log2 = time.time()
         t_sa = time.time()
@@ -209,7 +209,7 @@ def dagit(veri):
         
         while time.time() - t_sa < kalan:
             iter2 += 1
-            if time.time() - son_log2 > 25:
+            if time.time() - son_log2 > 30:
                 print(f"SA iter={iter2} ceza={toplam_c} T={sicaklik:.1f}", flush=True)
                 son_log2 = time.time()
             if toplam_c == 0: break

@@ -178,7 +178,7 @@ def dagit(veri):
     if cezalar: model.Minimize(sum(cezalar))
 
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = 100.0
+    solver.parameters.max_time_in_seconds = 50.0
     solver.parameters.num_workers = 8
     solver.parameters.random_seed = seed
     durum = solver.Solve(model)
@@ -197,7 +197,7 @@ def dagit(veri):
                 konum[g["id"]] = (gun, saat); break
 
     # ── ASAMA 2: SA pencere optimizasyonu ───────────────────────
-    kalan = 260 - (time.time() - t0)
+    kalan = 300 - (time.time() - t0)
     print(f"SA: {round(kalan)}s", flush=True)
 
     lkp = Lookup(gorevler, konum, gun_bilgi)

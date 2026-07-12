@@ -1,8 +1,8 @@
 """
-OkulYonetimSistemi - Ders Dagitim Motoru v2
-OR-Tools CP-SAT. 40 sinif icin optimize edilmis.
+OkulYonetimSistemi - Ders Dagitim Motoru v3
+OR-Tools CP-SAT. 40 sinif, min/max gunluk ders, random seed.
 """
-import time
+import time, random
 from ortools.sat.python import cp_model
 
 def dagit(veri):
@@ -15,6 +15,7 @@ def dagit(veri):
     gun_bilgi = {int(g["gun"]): int(g["saat"]) for g in veri.get("gunler", [])}
     kilitli = veri.get("kilitli", {})
     gunler = sorted(gun_bilgi.keys())
+    seed = veri.get("seed", random.randint(1, 999999))
 
     gorevler = []
     for sid, atama_list in atamalar.items():
@@ -27,10 +28,12 @@ def dagit(veri):
             bloklar = ders.get("blok_dagilim") or [ders.get("haftalik_saat",1)]
             for bi, boy in enumerate(bloklar):
                 if not boy: continue
-                gorevler.append({"id":f"{sid}_{did}_{bi}","sid":sid,"did":did,"tc":tc,"ogrtler":atama.get("ogretmenler",[]),"boy":int(boy),"bi":bi})
+                gorevler.append({"id":f"{sid}_{did}_{bi}","sid":sid,"did":did,"tc":tc,
+                                 "ogrtler":atama.get("ogretmenler",[]),"boy":int(boy),"bi":bi})
 
     if not gorevler:
-        return {"basari":True,"slots":{sid:{} for sid in siniflar},"eksikler":[],"sure_sn":0,"durum":"EMPTY"}
+        return {"basari":True,"slots":{sid:{} for sid in siniflar},
+                "eksikler":[],"sure_sn":0,"durum":"EMPTY"}
 
     # Karar degiskenleri
     x = {}
@@ -97,10 +100,59 @@ def dagit(veri):
                         if ag==gun and as_<=saat<as_+g["boy"]: av.append(x[(gid,ag,as_)])
                 if len(av)>1: model.Add(sum(av)<=1)
 
-    # Coz
+    # Min/Max gunluk ders kurali (ogretmen bazli)
+    # min_gunluk: ogretmen bir gune giriyorsa en az X saat girmeli
+    # max_gunluk: bir gunde en fazla Y saat
+    ceza_toplam = []
+    for tc, glist in tc_g.items():
+        k = kisitlar.get(tc, {})
+        min_gun = int(k.get("minGunlukSaat", 2))
+        max_gun = int(k.get("maxGunlukSaat", 8))
+
+        for gun in gunler:
+            # Bu ogretmenin bu gundeki toplam saatini hesapla
+            gun_saatleri = []
+            for g in glist:
+                gid = g["id"]
+                for (ag, as_) in gid_adaylar[gid]:
+                    if ag == gun:
+                        # bu blogun her saati icin
+                        for b in range(g["boy"]):
+                            gun_saatleri.append(x[(gid, ag, as_)])
+
+            if not gun_saatleri:
+                continue
+
+            toplam = sum(gun_saatleri)
+
+            # MAX kural: soft ceza (hard degil, esneklik icin)
+            if max_gun < 8:
+                asim = model.NewIntVar(0, 8, f"max_asim_{tc}_{gun}")
+                model.Add(toplam <= max_gun + asim)
+                ceza_toplam.append(50 * asim)
+
+            # MIN kural: eger o gun herhangi bir dersi varsa en az min_gun saat olmali
+            # "o gun dersi var mi?" boolean
+            gun_aktif = model.NewBoolVar(f"gun_aktif_{tc}_{gun}")
+            model.Add(toplam >= 1).OnlyEnforceIf(gun_aktif)
+            model.Add(toplam == 0).OnlyEnforceIf(gun_aktif.Not())
+
+            if min_gun >= 2:
+                # gun_aktif=1 ise toplam >= min_gun olmali (soft)
+                eksik = model.NewIntVar(0, min_gun, f"min_eksik_{tc}_{gun}")
+                model.Add(toplam + eksik >= min_gun).OnlyEnforceIf(gun_aktif)
+                model.Add(eksik == 0).OnlyEnforceIf(gun_aktif.Not())
+                ceza_toplam.append(100 * eksik)
+
+    # Amac: cezalari minimize et
+    if ceza_toplam:
+        model.Minimize(sum(ceza_toplam))
+
+    # Coz - her seferinde farkli seed ile farkli cozum
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = 55.0
     solver.parameters.num_workers = 4
+    solver.parameters.random_seed = seed
     solver.parameters.log_search_progress = False
     durum = solver.Solve(model)
     sure = time.time()-t0
@@ -118,14 +170,36 @@ def dagit(veri):
                     ders=dersler[g["did"]]
                     if gun not in slots[sid]: slots[sid][gun]={}
                     for b in range(g["boy"]):
-                        slots[sid][gun][saat+b]={"ders_id":g["did"],"ders_adi":ders.get("ders_adi",""),"kisa_ad":ders.get("kisa_ad",ders.get("ders_adi","")[:4]),"renk":ders.get("renk","#1a6b47"),"ogretmen_tc":g["tc"],"ogretmenler":g["ogrtler"],"kilitli":False}
+                        slots[sid][gun][saat+b]={
+                            "ders_id":g["did"],"ders_adi":ders.get("ders_adi",""),
+                            "kisa_ad":ders.get("kisa_ad",ders.get("ders_adi","")[:4]),
+                            "renk":ders.get("renk","#1a6b47"),"ogretmen_tc":g["tc"],
+                            "ogretmenler":g["ogrtler"],"kilitli":False
+                        }
                     yerlesik=True; break
             if not yerlesik:
-                eksikler.append({"sinif":siniflar[g["sid"]].get("sinif_adi"),"ders":dersler[g["did"]].get("ders_adi"),"blok":g["boy"]})
-    return {"basari":basarili,"slots":slots,"eksikler":eksikler,"sure_sn":round(sure,2),"durum":solver.StatusName(durum)}
+                eksikler.append({
+                    "sinif":siniflar[g["sid"]].get("sinif_adi"),
+                    "ders":dersler[g["did"]].get("ders_adi"),
+                    "blok":g["boy"]
+                })
+    return {"basari":basarili,"slots":slots,"eksikler":eksikler,
+            "sure_sn":round(sure,2),"durum":solver.StatusName(durum),"seed":seed}
 
 if __name__=="__main__":
-    import json
-    test={"siniflar":[{"id":str(i),"sinif_adi":f"9-{chr(64+i)}"} for i in range(1,6)],"dersler":[{"id":"101","ders_adi":"Matematik","haftalik_saat":4,"blok_dagilim":[2,2],"renk":"#2563eb","kisa_ad":"MAT"},{"id":"102","ders_adi":"Turkce","haftalik_saat":5,"blok_dagilim":[2,2,1],"renk":"#dc2626","kisa_ad":"TUR"}],"atamalar":{str(i):[{"ders_id":"101","ogretmen_tc":"TC001","ogretmenler":[{"tc":"TC001"}]},{"ders_id":"102","ogretmen_tc":"TC002","ogretmenler":[{"tc":"TC002"}]}] for i in range(1,6)},"kisitlar":{},"gunler":[{"gun":i,"saat":8} for i in range(1,6)],"kilitli":{}}
-    r=dagit(test)
-    print(f"Durum:{r['durum']} Sure:{r['sure_sn']}s Eksik:{len(r['eksikler'])}")
+    test={
+        "siniflar":[{"id":str(i),"sinif_adi":f"9-{chr(64+i)}"} for i in range(1,6)],
+        "dersler":[
+            {"id":"101","ders_adi":"Matematik","haftalik_saat":4,"blok_dagilim":[2,2],"renk":"#2563eb","kisa_ad":"MAT"},
+            {"id":"102","ders_adi":"Turkce","haftalik_saat":5,"blok_dagilim":[2,2,1],"renk":"#dc2626","kisa_ad":"TUR"},
+        ],
+        "atamalar":{str(i):[
+            {"ders_id":"101","ogretmen_tc":"TC001","ogretmenler":[{"tc":"TC001"}]},
+            {"ders_id":"102","ogretmen_tc":"TC002","ogretmenler":[{"tc":"TC002"}]},
+        ] for i in range(1,6)},
+        "kisitlar":{"TC001":{"minGunlukSaat":2,"maxGunlukSaat":6}},
+        "gunler":[{"gun":i,"saat":8} for i in range(1,6)],
+        "kilitli":{}
+    }
+    r = dagit(test)
+    print(f"Durum:{r['durum']} Sure:{r['sure_sn']}s Eksik:{len(r['eksikler'])} Seed:{r['seed']}")

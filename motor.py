@@ -132,19 +132,24 @@ def dagit(veri):
         min_mm = int(k_mm.get("minGunlukSaat", 2))
         max_mm = int(k_mm.get("maxGunlukSaat", 8))
         for gun_mm in gunler:
-            saat_vars_mm = []
+            # Toplam saat = sum(blok_baslangic_var * blok_boyu)
+            # Her blok başlangıç değişkeni o bloğun tüm saatlerini temsil eder
+            saat_ifade = []
             for g_mm in glist_mm:
                 for (ag_mm, as_mm) in gid_adaylar[g_mm["id"]]:
                     if ag_mm == gun_mm:
-                        for _ in range(g_mm["boy"]):
-                            saat_vars_mm.append(x[(g_mm["id"], ag_mm, as_mm)])
+                        # Bu blok başlangıcı boy kadar saat kaplar
+                        saat_ifade.append((x[(g_mm["id"], ag_mm, as_mm)], g_mm["boy"]))
+            if not saat_ifade: continue
+            saat_vars_mm = saat_ifade  # (var, katsayi) çiftleri
             if not saat_vars_mm: continue
-            toplam_mm = sum(saat_vars_mm)
+            toplam_mm = sum(v * k for v, k in saat_vars_mm)
             # Hard MAX
             model.Add(toplam_mm <= max_mm)
             # Soft MIN: aktifse min_mm saat
             bas_mm = [x[(g_mm["id"], ag_mm, as_mm)] for g_mm in glist_mm
                       for (ag_mm, as_mm) in gid_adaylar[g_mm["id"]] if ag_mm == gun_mm]
+            if not bas_mm: continue
             if bas_mm and min_mm >= 2:
                 aktif_mm = model.NewBoolVar(f"amm_{tc_mm}_{gun_mm}")
                 model.Add(sum(bas_mm) >= 1).OnlyEnforceIf(aktif_mm)

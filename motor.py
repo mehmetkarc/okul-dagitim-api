@@ -378,7 +378,6 @@ def _dagit_tek_deneme(veri):
         if not yerlestirmeye_calis(gid):
             eksikler_gid.append(gid)
 
-    # ---------------- 5b. Otomatik bos gun atama ----------------
     def kovarak_yerlestir_haric(gid, haric_gun):
         """gid'i haric_gun DISINDAKI bir gune, gerekirse o gundeki bir hucreyi
         isgal edeni KOVARAK yerlestirir. gunu_tamamen_bosalt icin: dogrudan
@@ -436,6 +435,63 @@ def _dagit_tek_deneme(veri):
                     geri_al(nokta)
         return False
 
+    def kovarak_yerlestir_gunde(gid, hedef_gun):
+        """gid'i SPECIFIK OLARAK hedef_gun'e, gerekirse o gundeki bir hucreyi
+        isgal edeni KOVARAK (tam swap) yerlestirmeyi dener. kovarak_yerlestir_haric
+        'herhangi bir gun (X haric)' arar, bu ise 'SADECE bu gun' hedefler -
+        min-gunluk-saat doldurma icin: %100 dolu sinif programlarinda hedef
+        gunde dogrudan bos hucre bulunamadiginda, o hucreyi isgal eden dersle
+        YER DEGISTIRIR (o ders baska bir gune/saate tasinir)."""
+        g = gid_map[gid]
+        ogrtler_g = tum_ogrt(g)
+        if any(tc_kisit[tc]["bosGun"] == hedef_gun or hedef_gun in tc_kisit[tc]["kapali"]
+               for tc in ogrtler_g):
+            return False
+        key = (g["sid"], g["did"])
+        if gun_ders.get(key, {}).get(hedef_gun, 0) >= 1:
+            return False
+        if any(tc_kisit[tc]["maxG"] and day_load[tc][hedef_gun] + g["boy"] > tc_kisit[tc]["maxG"]
+               for tc in ogrtler_g):
+            return False
+        for saat in range(1, gun_bilgi[hedef_gun] - g["boy"] + 2):
+            cakisanlar = set()
+            bloklanmis = False
+            for b in range(g["boy"]):
+                s = saat + b
+                occ = class_occ[g["sid"]].get((hedef_gun, s))
+                if occ == "KILITLI":
+                    bloklanmis = True
+                    break
+                if occ:
+                    cakisanlar.add(occ)
+                for otc in ogrtler_g:
+                    occ2 = teacher_occ[otc].get((hedef_gun, s))
+                    if occ2 == "KILITLI":
+                        bloklanmis = True
+                        break
+                    if occ2:
+                        cakisanlar.add(occ2)
+                if bloklanmis:
+                    break
+            if bloklanmis or not cakisanlar or len(cakisanlar) > 2:
+                continue
+            nokta = kontrol_noktasi()
+            for cg in sorted(cakisanlar):
+                bosalt(cg)
+            if musait_mi(gid, hedef_gun, saat):
+                yerlestir(gid, hedef_gun, saat)
+                basarili = True
+                for cg in sorted(cakisanlar):
+                    if not yerlestirmeye_calis(cg, MAX_DERINLIK - 1):
+                        basarili = False
+                        break
+                if basarili:
+                    return True
+                geri_al(nokta)
+            else:
+                geri_al(nokta)
+        return False
+
     def gunu_tamamen_bosalt(tc, gun):
         """tc'nin gun'deki TUM derslerini baska gunlere tasimaya calisir -
         once dogrudan bos hucre arar, olmazsa kovarak yer acar (hepsi
@@ -461,29 +517,29 @@ def _dagit_tek_deneme(veri):
             return False
         return True
 
-    def otomatik_bos_gun_pass():
-        """Manuel bosGun'u OLMAYAN ogretmenler icin otomatik bir bos gun
-        olusturmaya calisir. Ders yukunun daha az sayida gune sikismasi hem
-        'asla tek ders' hem pencere hedeflerini kokten kolaylastirir (bosGun
-        disinda kalan gunler dogal olarak daha bitisik hale gelir).
-        TUM gunleri (sadece o an en az yuklu olani degil) en-az-yuklu'den
-        en-cok-yuklu'ye dener, ilk basarili olanda durur."""
-        for tc in tum_tc:
-            if tc_kisit[tc]["bosGun"] is not None:
-                continue  # manuel bosGun'a asla dokunma
-            calisilan_gunler = [g for g in gunler if day_load[tc][g] > 0]
-            if len(calisilan_gunler) <= 1:
-                continue  # zaten dogal bir bos gunu var (ya da hic yuku yok)
-            adaylar_gun = sorted(calisilan_gunler, key=lambda g: day_load[tc][g])
-            for aday_gun in adaylar_gun:
-                if gunu_tamamen_bosalt(tc, aday_gun):
-                    break
+    def ogrt_bos_gun_var_mi(tc):
+        """tc'nin (herhangi bir sebeple - dogal, manuel bosGun, ya da onceki
+        bir gecisin bosalttigi) zaten yuku SIFIR olan bir gunu var mi?"""
+        return any(day_load[tc][g] == 0 for g in gunler)
 
-    otomatik_bos_gun_pass()
+    def ihlal_sayisi():
+        """Su anki min-gunluk-saat ihlali sayisi (0<yuk<ming olan gun sayisi)."""
+        n = 0
+        for tc2 in tum_tc:
+            ming2 = tc_kisit[tc2]["minG"]
+            if not ming2:
+                continue
+            for gun2 in gunler:
+                if 0 < day_load[tc2][gun2] < ming2:
+                    n += 1
+        return n
 
-    # ---------------- 6. "Asla tek ders" garantisi: gunu doldur ya da tamamen bosalt ----------------
+    # ---------------- 6. "Asla tek ders" garantisi (MUTLAK ONCELIK) ----------------
     def gunu_doldur(tc, gun, ming):
-        """gun uzerindeki yuku, digerlerinden tasiyarak ming'e cikarmayi dener."""
+        """gun uzerindeki yuku, digerlerinden tasiyarak ming'e cikarmayi dener.
+        Once dogrudan bos hucre arar, bulamazsa TAM SWAP (kovarak_yerlestir_gunde)
+        dener - %100 dolu sinif programlarinda dogrudan bos hucre neredeyse hic
+        olmadigindan bu adim olmadan pek cok vaka cozulemiyordu."""
         degisti = False
         adaylar_tasima = [g for g in gorevler
                            if tc in tum_ogrt(g) and g["placed"] and g["placed"][0] != gun]
@@ -506,12 +562,38 @@ def _dagit_tek_deneme(veri):
                 geri_al(nokta)
         return degisti
 
+    def gunu_doldur_swap_ile(tc, gun, ming):
+        """gunu_doldur basarisiz olduysa, TAM SWAP (kovarak_yerlestir_gunde)
+        ile tekrar dener - dogrudan bos hucre bulunamayan yogun/%100 dolu
+        programlarda bu, iki dersin yer degistirmesiyle yer acar."""
+        degisti = False
+        adaylar_tasima = [g for g in gorevler
+                           if tc in tum_ogrt(g) and g["placed"] and g["placed"][0] != gun]
+        adaylar_tasima.sort(key=lambda g: -day_load[tc][g["placed"][0]])
+        for t in adaylar_tasima:
+            if day_load[tc][gun] >= ming:
+                break
+            kaynak_gun = t["placed"][0]
+            kalan = day_load[tc][kaynak_gun] - t["boy"]
+            if 0 < kalan < ming:
+                continue
+            nokta = kontrol_noktasi()
+            bosalt(t["id"])
+            if kovarak_yerlestir_gunde(t["id"], gun):
+                degisti = True
+            else:
+                geri_al(nokta)
+        return degisti
+
     def tek_ders_yasakla_pass():
-        """'Asla tek ders / gunde minGunlukSaat altinda ders olmasin' hedefini
-        ITERATIF olarak zorlar: her ihlal icin once DOLDURMAYI, olmazsa
-        TAMAMEN BOSALTMAYI dener. Bir degisiklik baskasini tetikleyebilecegi
-        icin degisiklik kalmayana ya da MAX_TUR'a kadar tekrarlar."""
-        MAX_TUR = 8
+        """'Asla tek ders / gunde minGunlukSaat altinda ders olmasin' - BU
+        KURAL MUTLAKTIR, bos gun tercihinden ONCELIKLIDIR. Her ihlal icin
+        once DOLDURMAYI (dogrudan), sonra DOLDURMAYI (swap ile), olmazsa
+        KOSULSUZ TAMAMEN BOSALTMAYI dener (gerekirse 2. bir bos gun pahasina
+        bile olsa - tek ders kuralinin istisnasi yoktur). Bir degisiklik
+        baskasini tetikleyebilecegi icin degisiklik kalmayana ya da
+        MAX_TUR'a kadar tekrarlar."""
+        MAX_TUR = 10
         for _ in range(MAX_TUR):
             degisti = False
             for tc in tum_tc:
@@ -524,6 +606,8 @@ def _dagit_tek_deneme(veri):
                         continue
                     if gunu_doldur(tc, gun, ming):
                         degisti = True
+                    elif gunu_doldur_swap_ile(tc, gun, ming):
+                        degisti = True
                     elif gunu_tamamen_bosalt(tc, gun):
                         degisti = True
             if not degisti:
@@ -531,16 +615,38 @@ def _dagit_tek_deneme(veri):
 
     tek_ders_yasakla_pass()
 
-    # ---------------- 7. Bos gun konsolidasyonu (kalan az kullanilan gunleri de bosalt) ----------------
-    def bos_gun_pass():
+    # ---------------- 7. Otomatik bos gun atama (ISTEGE BAGLI - tek-ders kuralini ASLA bozmaz) ----------------
+    def otomatik_bos_gun_pass():
+        """Manuel bosGun'u OLMAYAN ve HENUZ hicbir bos gunu olmayan
+        ogretmenler icin otomatik bir bos gun olusturmaya CALISIR (bazi
+        ogretmenler icin bu mumkun olmayabilir - bu normal, herkese bos gun
+        garanti edilmez). TUM gunleri en-az-yuklu'den en-cok-yuklu'ye dener.
+        GUVENLIK: her denemeden sonra toplam tek-ders ihlali sayisini
+        kontrol eder - eger bu bos gun denemesi YENI bir ihlale yol actiysa
+        KESIN GERI ALINIR ve bir sonraki gun adayi denenir. Boylece bos gun
+        ozelligi asla 'asla tek ders' kuralini bozamaz."""
         for tc in tum_tc:
-            yukler = {gun: day_load[tc][gun] for gun in gunler if day_load[tc][gun] > 0}
-            if len(yukler) <= 1:
+            if tc_kisit[tc]["bosGun"] is not None:
+                continue  # manuel bosGun'a asla dokunma
+            if ogrt_bos_gun_var_mi(tc):
+                continue  # zaten (dogal ya da tek-ders duzeltmesinden) bir bos gunu var
+            calisilan_gunler = [g for g in gunler if day_load[tc][g] > 0]
+            if len(calisilan_gunler) <= 1:
                 continue
-            hedef_gun = min(yukler, key=yukler.get)
-            gunu_tamamen_bosalt(tc, hedef_gun)
+            adaylar_gun = sorted(calisilan_gunler, key=lambda g: day_load[tc][g])
+            for aday_gun in adaylar_gun:
+                once = ihlal_sayisi()
+                nokta = kontrol_noktasi()
+                if gunu_tamamen_bosalt(tc, aday_gun):
+                    if ihlal_sayisi() > once:
+                        geri_al(nokta)  # yeni tek-ders ihlali yaratti - kabul edilemez
+                        continue
+                    break  # basarili VE tek-ders kuralini bozmadi
 
-    bos_gun_pass()
+    otomatik_bos_gun_pass()
+
+    # ---------------- 7b. Son tek-ders temizligi (bos gun gecisi yan etki yaratmis olabilir) ----------------
+    tek_ders_yasakla_pass()
 
     # ---------------- 8. Pencere minimizasyonu (hedef: haftalik <=2 pencere) ----------------
     MAX_PENCERE_HEDEF = 2

@@ -796,6 +796,13 @@ def _dagit_tek_deneme(veri):
 
     pencere_azalt_pass()
 
+    # ---------------- 8b. Son guvenlik agi: pencere gecisi tek-ders ihlali yaratmis olabilir ----------------
+    # pencere_azalt_pass yalnizca pencereyi optimize eder, min-gunluk-saat
+    # kuralindan HABERSIZDIR - bir dersi baska bir gune tasirken yeni bir
+    # tek-ders kalintisi birakabilir. 'Asla tek ders' MUTLAK kural oldugundan
+    # (pencereden ONCELIKLI), burada son bir kez zorluyoruz.
+    tek_ders_yasakla_pass()
+
     # ---------------- 9. Eksikleri tekrar dene ----------------
     hala_eksik = []
     for gid in eksikler_gid:

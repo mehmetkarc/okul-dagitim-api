@@ -606,6 +606,17 @@ def _dagit_tek_deneme(veri):
                     n += 1
         return n
 
+    def fazla_bos_gun_toplam():
+        """Su anki toplam 'fazla bos gun' ihlali (idareci olmayan, 2+ bos
+        gunu olan ogretmen sayisi). Takas gibi islemler bunu ARTIRMAMALI."""
+        n = 0
+        for tc2 in tum_tc:
+            if idareci_mi[tc2]:
+                continue
+            if sum(1 for g2 in gunler if day_load[tc2][g2] == 0) >= 2:
+                n += 1
+        return n
+
     # ---------------- 6. "Asla tek ders" garantisi (MUTLAK ONCELIK) ----------------
     def gunu_doldur(tc, gun, ming):
         """gun uzerindeki yuku, digerlerinden tasiyarak ming'e cikarmayi dener.
@@ -663,12 +674,14 @@ def _dagit_tek_deneme(veri):
 
     def tek_ders_yasakla_pass():
         """'Asla tek ders / gunde minGunlukSaat altinda ders olmasin' - BU
-        KURAL MUTLAKTIR, bos gun tercihinden ONCELIKLIDIR. Her ihlal icin
-        once DOLDURMAYI (dogrudan), sonra DOLDURMAYI (swap ile), olmazsa
-        KOSULSUZ TAMAMEN BOSALTMAYI dener (gerekirse 2. bir bos gun pahasina
-        bile olsa - tek ders kuralinin istisnasi yoktur). Bir degisiklik
-        baskasini tetikleyebilecegi icin degisiklik kalmayana ya da
-        MAX_TUR'a kadar tekrarlar."""
+        KURAL COK ONEMLIDIR ama 'ASLA 2. BOS GUN YARATMA' kuralindan DAHA
+        DUSUK ONCELIKLIDIR (kullanici acikca boyle istedi). Her ihlal icin
+        once DOLDURMAYI (dogrudan), sonra DOLDURMAYI (swap ile) dener; TAMAMEN
+        BOSALTMA (bu bir 2. bos gun yaratabilir) SADECE bu ogretmenin HENUZ
+        hic bos gunu yoksa denenir - aksi halde nadir bir tek-ders kalintisi,
+        2. bos gunden daha az sorunlu bir uzlasim olarak kabul edilir. Bir
+        degisiklik baskasini tetikleyebilecegi icin degisiklik kalmayana ya
+        da MAX_TUR'a kadar tekrarlar."""
         MAX_TUR = 10
         for _ in range(MAX_TUR):
             if _zaman_doldu():
@@ -686,7 +699,7 @@ def _dagit_tek_deneme(veri):
                         degisti = True
                     elif gunu_doldur_swap_ile(tc, gun, ming):
                         degisti = True
-                    elif gunu_tamamen_bosalt(tc, gun):
+                    elif not ogrt_bos_gun_var_mi(tc) and gunu_tamamen_bosalt(tc, gun):
                         degisti = True
             if not degisti:
                 break
@@ -731,7 +744,42 @@ def _dagit_tek_deneme(veri):
 
     otomatik_bos_gun_pass()
 
-    # ---------------- 7b. Son tek-ders temizligi (bos gun gecisi yan etki yaratmis olabilir) ----------------
+    # ---------------- 7b. Fazla bos gunu doldur (asla 2. bos gun kurali - MUTLAK) ----------------
+    def fazla_bos_gun_konsolide_pass():
+        """Bir ogretmenin (idareci olmayan) manuel/oto-atanan bosGun'u
+        DISINDA fazladan bos gunu varsa (on-atama sonrasi dogal yerlesimden
+        kaynaklanabilir - otomatik_bos_gun_pass zaten-bosGun'u-olani
+        atladigi icin bunu kendisi duzeltmez), bu fazlaligi baska
+        gunlerden is tasiyarak DOLDURMAYA calisir. 'Asla 2 gun bos'
+        kurali MUTLAKTIR - bu yuzden bu gecis zaman butcesi disinda bile
+        (cok kisa surer) her zaman calisir."""
+        for tur in range(5):
+            degisti = False
+            for tc in tum_tc:
+                if idareci_mi[tc]:
+                    continue
+                korunacak_gun = tc_kisit[tc]["bosGun"]  # manuel/on-atanan - buna DOKUNULMAZ
+                if korunacak_gun is not None:
+                    fazla_gunler = [g for g in gunler if day_load[tc][g] == 0 and g != korunacak_gun]
+                else:
+                    tum_bos = [g for g in gunler if day_load[tc][g] == 0]
+                    if len(tum_bos) <= 1:
+                        continue
+                    fazla_gunler = tum_bos[1:]  # ilki (tum_bos[0]) korunur
+                if not fazla_gunler:
+                    continue
+                ming = tc_kisit[tc]["minG"] or 2
+                for fazla_gun in fazla_gunler:
+                    if gunu_doldur(tc, fazla_gun, ming):
+                        degisti = True
+                    elif gunu_doldur_swap_ile(tc, fazla_gun, ming):
+                        degisti = True
+            if not degisti:
+                break
+
+    fazla_bos_gun_konsolide_pass()
+
+    # ---------------- 7c. Son tek-ders temizligi (bos gun gecisi yan etki yaratmis olabilir) ----------------
     tek_ders_yasakla_pass()
 
     # ---------------- 8. Pencere minimizasyonu (hedef: haftalik <=2 pencere) ----------------
@@ -888,12 +936,15 @@ def _dagit_tek_deneme(veri):
 
     pencere_azalt_pass()
 
-    # ---------------- 8b. Son guvenlik agi: pencere gecisi tek-ders ihlali yaratmis olabilir ----------------
-    # pencere_azalt_pass yalnizca pencereyi optimize eder, min-gunluk-saat
-    # kuralindan HABERSIZDIR - bir dersi baska bir gune tasirken yeni bir
-    # tek-ders kalintisi birakabilir. 'Asla tek ders' MUTLAK kural oldugundan
-    # (pencereden ONCELIKLI), burada son bir kez zorluyoruz.
+    # ---------------- 8b. Son guvenlik agi: pencere/tek-ders gecisleri yan etki yaratmis olabilir ----------------
+    # pencere_azalt_pass yalnizca pencereyi optimize eder, min-gunluk-saat VE
+    # 'asla 2 bos gun' kurallarindan HABERSIZDIR - bir dersi baska gune
+    # tasirken (a) yeni bir tek-ders kalintisi biraktabilir, (b) kaynak
+    # gunu tamamen bosaltip 2. bir bos gun yaratabilir. Her iki kural da
+    # MUTLAK oldugundan burada sirayla son bir kez zorluyoruz.
     tek_ders_yasakla_pass()
+    fazla_bos_gun_konsolide_pass()
+    tek_ders_yasakla_pass()  # konsolide de yeni tek-ders yaratmis olabilir
 
     # ---------------- 9. Eksikleri tekrar dene ----------------
     hala_eksik = []
@@ -951,7 +1002,8 @@ def _dagit_tek_deneme(veri):
         gun1, saat1 = g1["placed"]
         gun2, saat2 = g2["placed"]
         ogrtler1_eski, ogrtler2_eski = g1["ogrtler"], g2["ogrtler"]
-        once = ihlal_sayisi()
+        once_ihlal = ihlal_sayisi()
+        once_fazla = fazla_bos_gun_toplam()
         nokta = kontrol_noktasi()
         bosalt(gid1)
         bosalt(gid2)
@@ -960,7 +1012,7 @@ def _dagit_tek_deneme(veri):
         if musait_mi(gid1, gun1, saat1) and musait_mi(gid2, gun2, saat2):
             yerlestir(gid1, gun1, saat1)
             yerlestir(gid2, gun2, saat2)
-            if ihlal_sayisi() > once:
+            if ihlal_sayisi() > once_ihlal or fazla_bos_gun_toplam() > once_fazla:
                 g1["tc"], g2["tc"] = tc1_eski, tc2_eski
                 g1["ogrtler"], g2["ogrtler"] = ogrtler1_eski, ogrtler2_eski
                 geri_al(nokta)
@@ -991,6 +1043,62 @@ def _dagit_tek_deneme(veri):
                 break
 
     brans_takas_pass()
+
+    # ---------------- 9b. Fazla bos gunu BRANS TAKASIYLA doldurmayi zorla ----------------
+    # fazla_bos_gun_konsolide_pass (dogrudan doldur/swap) bazi ogretmenler icin
+    # basarisiz kalabiliyor (hedef sinif zaten dolu). Bu son care: o gundeki
+    # AYNI BRANSTAN baska bir ogretmenin dersini TAKAS ederek (sinif/saat hic
+    # degismeden, sadece kim ogrettigi degisir) o gunu doldurmaya calisir -
+    # boylece hedef sinifin dolu olmasi sorun olmaktan cikar.
+    def _ogretmenin_fazla_gunleri(tc):
+        korunacak_gun = tc_kisit[tc]["bosGun"]
+        if korunacak_gun is not None:
+            return [g for g in gunler if day_load[tc][g] == 0 and g != korunacak_gun]
+        tum_bos = [g for g in gunler if day_load[tc][g] == 0]
+        return tum_bos[1:] if len(tum_bos) > 1 else []
+
+    def _fazla_bos_gun_brans_takasi_dene(tc):
+        brans = tc_kisit[tc]["brans"]
+        if not brans:
+            return False
+        for fazla_gun in _ogretmenin_fazla_gunleri(tc):
+            adaylar_g2 = [g2 for g2 in gorevler
+                          if g2["placed"] and g2["placed"][0] == fazla_gun
+                          and g2["tc"] and g2["tc"] != tc
+                          and tc_kisit.get(g2["tc"], {}).get("brans") == brans]
+            for g2 in adaylar_g2:
+                boy2 = g2["boy"]
+                adaylar_g1 = [g1 for g1 in gorevler
+                              if g1["placed"] and tc in tum_ogrt(g1) and g1["boy"] == boy2
+                              and g1["placed"][0] != fazla_gun]
+                for g1 in adaylar_g1:
+                    if _takasi_uygula(g1["id"], g2["id"]):
+                        return True
+        return False
+
+    def fazla_bos_gun_brans_takas_pass():
+        for _tur in range(10):
+            if _zaman_doldu():
+                break
+            hedefler = [tc for tc in tum_tc if not idareci_mi[tc] and tc_kisit[tc]["brans"]
+                        and _ogretmenin_fazla_gunleri(tc)]
+            if not hedefler:
+                break
+            degisti = False
+            for tc in hedefler:
+                if _zaman_doldu():
+                    break
+                if _fazla_bos_gun_brans_takasi_dene(tc):
+                    degisti = True
+            if not degisti:
+                break
+
+    fazla_bos_gun_brans_takas_pass()
+
+    # ---------------- 9c. Son guvenlik taramasi ----------------
+    tek_ders_yasakla_pass()
+    fazla_bos_gun_konsolide_pass()
+    tek_ders_yasakla_pass()
 
     # ---------------- 10. Cikti ----------------
     slots = {sid: {} for sid in siniflar}
@@ -1106,9 +1214,9 @@ def dagit(veri, kac_deneme=8, zaman_siniri_sn=320):
         ist = sonuc.get("istatistik", {})
         skor = (
             len(sonuc["eksikler"]) * 1_000_000
+            + ist.get("fazla_bos_gun_sayisi", 0) * 100_000
             + ist.get("min_ihlal_sayisi", 0) * 50_000
             + ist.get("sifir_bos_gun_sayisi", 0) * 8_000
-            + ist.get("fazla_bos_gun_sayisi", 0) * 5_000
             + ist.get("pencere_fazla_sayisi", 0) * 100
             + ist.get("pencere_toplam", 0)
         )

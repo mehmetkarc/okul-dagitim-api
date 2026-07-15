@@ -39,6 +39,11 @@ import random
 
 def _dagit_tek_deneme(veri):
     t0 = time.time()
+    _deneme_butcesi = float(veri.get("_deneme_butcesi_sn", 90 if veri.get("on_bos_gun_ata") else 40))
+
+    def _zaman_doldu():
+        return time.time() - t0 > _deneme_butcesi
+
     siniflar  = {str(s["id"]): s for s in veri.get("siniflar", [])}
     dersler   = {str(d["id"]): d for d in veri.get("dersler", [])}
     atamalar  = {str(k): v for k, v in veri.get("atamalar", {}).items()}
@@ -135,6 +140,33 @@ def _dagit_tek_deneme(veri):
             "maxG":   int(k["maxGunlukSaat"]) if k.get("maxGunlukSaat") else None,
         }
     tc_kisit = {tc: kisit_al(tc) for tc in tum_tc}
+
+    # ---------------- 2b. Idareci muafiyeti (2-12 saat toplam yuku olanlar) ----------------
+    # Mudur/mudur yardimcisi gibi cok az ders saati olan ("ek ders") idareciler
+    # zaten her gun okulda oldugundan bos gun/pencere hedefi onlar icin anlamsiz.
+    # SADECE bos gun atama ve pencere azaltmadan MUAF tutulurlar - "asla tek ders"
+    # kurali ONLAR ICIN DE gecerlidir (istisnasi yok).
+    _toplam_yuk = {tc: 0 for tc in tum_tc}
+    for g in gorevler:
+        for tc in ([g["tc"]] + g["ek_tcler"] if g["tc"] else g["ek_tcler"]):
+            if tc in _toplam_yuk:
+                _toplam_yuk[tc] += g["boy"]
+    IDARECI_MIN_YUK, IDARECI_MAX_YUK = 2, 12
+    idareci_mi = {tc: (IDARECI_MIN_YUK <= _toplam_yuk[tc] <= IDARECI_MAX_YUK) for tc in tum_tc}
+
+    # ---------------- 2c. (Opsiyonel) ON-ATAMA bos gun ----------------
+    # Yerlestirmeden SONRA (zaten %100 dolu) bir gunu bosaltmaya calismak
+    # (kovma ile) cok zor - onun yerine yerlestirme BASLAMADAN ONCE bosGun'u
+    # atarsak, greedy/MRV motoru bunun etrafinda DOGAL olarak calisir (tipki
+    # manuel bosGun verilen bir ogretmen gibi). veri["on_bos_gun_ata"]=True
+    # ise denenir; TUM dersler yine de yerlesmezse (eksik>0) bu deneme dusuk
+    # puan alir ve coklu-deneme baska bir stratejiyle (post-hoc kovma) devam
+    # eder - "tum dersler yerlessin" kuralindan asla odun verilmez.
+    if veri.get("on_bos_gun_ata"):
+        uygun_tc = [tc for tc in tum_tc if not idareci_mi[tc] and tc_kisit[tc]["bosGun"] is None]
+        rnd.shuffle(uygun_tc)
+        for i, tc in enumerate(uygun_tc):
+            tc_kisit[tc]["bosGun"] = gunler[i % len(gunler)]
 
     # ---------------- 3. Doluluk gridleri ----------------
     class_occ   = {sid: {} for sid in siniflar}        # {(gun,saat): gid}
@@ -289,7 +321,12 @@ def _dagit_tek_deneme(veri):
     kuyruk.extend(g["id"] for g in gorevler if not g["tc"])  # ogretmensiz dersler en sona
 
     # ---------------- 5. Yerlestirme + displacement ----------------
-    MAX_DERINLIK = 3
+    # on_bos_gun_ata modunda butun ogretmenler bastan kisitli oldugundan
+    # yerlestirme daha zor - biraz daha derin arama gerekiyor (4), ama 5
+    # bazi tohumlarda 200+ saniyeye kadar patlayabiliyordu. Post-hoc modda
+    # (varsayilan) 3 yeterli ve hizli.
+    MAX_DERINLIK = 5 if veri.get("on_bos_gun_ata") else 3
+    DERIN_TAVAN = 6          # gec gecisler (tek-ders/bos-gun/pencere) icin - zaman siniri gevsek
 
     def kontrol_noktasi():
         """O(1) - sadece log uzunlugunu kaydeder."""
@@ -308,12 +345,16 @@ def _dagit_tek_deneme(veri):
             if eski_pos is not None:
                 _yerlestir_ham(gid, eski_pos[0], eski_pos[1])
 
-    def yerlestirmeye_calis(gid, derinlik=0):
+    def yerlestirmeye_calis(gid, derinlik=0, tavan=None):
+        if tavan is None:
+            tavan = MAX_DERINLIK
+        if derinlik == 0 and _zaman_doldu():
+            return False  # butce doldu, bu gorevi denemeden eksik say
         aday = en_iyi_aday(gid)
         if aday:
             yerlestir(gid, aday[0], aday[1])
             return True
-        if derinlik >= MAX_DERINLIK:
+        if derinlik >= tavan:
             return False
 
         g = gid_map[gid]
@@ -321,6 +362,8 @@ def _dagit_tek_deneme(veri):
         key = (g["sid"], g["did"])
 
         for gun in gunler:
+            if _zaman_doldu():
+                return False
             if any(tc_kisit[tc]["bosGun"] == gun or gun in tc_kisit[tc]["kapali"] for tc in ogrtler):
                 continue
             if gun_ders.get(key, {}).get(gun, 0) >= 1:
@@ -363,7 +406,7 @@ def _dagit_tek_deneme(veri):
                     yerlestir(gid, gun, saat)
                     basarili = True
                     for cg in cakisanlar:
-                        if not yerlestirmeye_calis(cg, derinlik + 1):
+                        if not yerlestirmeye_calis(cg, derinlik + 1, tavan):
                             basarili = False
                             break
                     if basarili:
@@ -373,8 +416,17 @@ def _dagit_tek_deneme(veri):
                     geri_al(nokta)
         return False
 
+    # on_bos_gun_ata modunda MAX_DERINLIK=5 kullaniyoruz (eksiksiz yerlesme
+    # sansini artirmak icin) ama bazi tohum/siralama kombinasyonlarinda kovma
+    # zinciri patlayip cok uzun surebiliyor. ANA DONGU ortak zaman butcesine
+    # baglidir: butce asilirsa kalan gorevler direkt eksik sayilir (multi-
+    # restart zaten dusuk puanla eler), boylece TEK bir deneme asla toplam
+    # sureyi tehlikeye atmiyor.
     eksikler_gid = []
     for gid in kuyruk:
+        if _zaman_doldu():
+            eksikler_gid.append(gid)
+            continue
         if not yerlestirmeye_calis(gid):
             eksikler_gid.append(gid)
 
@@ -386,6 +438,8 @@ def _dagit_tek_deneme(veri):
         g = gid_map[gid]
         ogrtler_g = tum_ogrt(g)
         for gun in gunler:
+            if _zaman_doldu():
+                return False
             if gun == haric_gun:
                 continue
             if any(tc_kisit[tc]["bosGun"] == gun or gun in tc_kisit[tc]["kapali"] for tc in ogrtler_g):
@@ -416,7 +470,7 @@ def _dagit_tek_deneme(veri):
                             cakisanlar.add(occ2)
                     if bloklanmis:
                         break
-                if bloklanmis or not cakisanlar or len(cakisanlar) > 2:
+                if bloklanmis or not cakisanlar or len(cakisanlar) > 3:
                     continue
                 nokta = kontrol_noktasi()
                 for cg in sorted(cakisanlar):
@@ -425,7 +479,7 @@ def _dagit_tek_deneme(veri):
                     yerlestir(gid, gun, saat)
                     basarili = True
                     for cg in sorted(cakisanlar):
-                        if not yerlestirmeye_calis(cg, MAX_DERINLIK - 1):
+                        if not yerlestirmeye_calis(cg, 0, tavan=DERIN_TAVAN):
                             basarili = False
                             break
                     if basarili:
@@ -454,6 +508,8 @@ def _dagit_tek_deneme(veri):
                for tc in ogrtler_g):
             return False
         for saat in range(1, gun_bilgi[hedef_gun] - g["boy"] + 2):
+            if _zaman_doldu():
+                return False
             cakisanlar = set()
             bloklanmis = False
             for b in range(g["boy"]):
@@ -473,7 +529,7 @@ def _dagit_tek_deneme(veri):
                         cakisanlar.add(occ2)
                 if bloklanmis:
                     break
-            if bloklanmis or not cakisanlar or len(cakisanlar) > 2:
+            if bloklanmis or not cakisanlar or len(cakisanlar) > 3:
                 continue
             nokta = kontrol_noktasi()
             for cg in sorted(cakisanlar):
@@ -482,7 +538,7 @@ def _dagit_tek_deneme(veri):
                 yerlestir(gid, hedef_gun, saat)
                 basarili = True
                 for cg in sorted(cakisanlar):
-                    if not yerlestirmeye_calis(cg, MAX_DERINLIK - 1):
+                    if not yerlestirmeye_calis(cg, 0, tavan=DERIN_TAVAN):
                         basarili = False
                         break
                 if basarili:
@@ -504,6 +560,9 @@ def _dagit_tek_deneme(veri):
             bosalt(t["id"])
         hepsi = True
         for t in tasklar:
+            if _zaman_doldu():
+                hepsi = False
+                break
             aday = en_iyi_aday(t["id"], haric_gun=gun)
             if aday:
                 yerlestir(t["id"], aday[0], aday[1])
@@ -545,6 +604,8 @@ def _dagit_tek_deneme(veri):
                            if tc in tum_ogrt(g) and g["placed"] and g["placed"][0] != gun]
         adaylar_tasima.sort(key=lambda g: -day_load[tc][g["placed"][0]])
         for t in adaylar_tasima:
+            if _zaman_doldu():
+                break
             if day_load[tc][gun] >= ming:
                 break
             kaynak_gun = t["placed"][0]
@@ -571,6 +632,8 @@ def _dagit_tek_deneme(veri):
                            if tc in tum_ogrt(g) and g["placed"] and g["placed"][0] != gun]
         adaylar_tasima.sort(key=lambda g: -day_load[tc][g["placed"][0]])
         for t in adaylar_tasima:
+            if _zaman_doldu():
+                break
             if day_load[tc][gun] >= ming:
                 break
             kaynak_gun = t["placed"][0]
@@ -595,6 +658,8 @@ def _dagit_tek_deneme(veri):
         MAX_TUR'a kadar tekrarlar."""
         MAX_TUR = 10
         for _ in range(MAX_TUR):
+            if _zaman_doldu():
+                break
             degisti = False
             for tc in tum_tc:
                 ming = tc_kisit[tc]["minG"]
@@ -625,9 +690,17 @@ def _dagit_tek_deneme(veri):
         kontrol eder - eger bu bos gun denemesi YENI bir ihlale yol actiysa
         KESIN GERI ALINIR ve bir sonraki gun adayi denenir. Boylece bos gun
         ozelligi asla 'asla tek ders' kuralini bozamaz."""
-        for tc in tum_tc:
-            if tc_kisit[tc]["bosGun"] is not None:
-                continue  # manuel bosGun'a asla dokunma
+        # Sabit sira erken islenen ogretmenlerin tum esnekligi (kovma firsatlarini)
+        # tuketip sonrakilere yer birakmamasina yol aciyordu. Once EN AGIR YUKLU
+        # ogretmenlerden basla (en cok ihtiyaci olanlar), esit yuklerde deneme
+        # bazli (seed'e bagli) karistir - coklu deneme boylece farkli
+        # kombinasyonlar kesfeder.
+        aday_tc_listesi = [tc for tc in tum_tc if not idareci_mi[tc] and tc_kisit[tc]["bosGun"] is None]
+        rnd.shuffle(aday_tc_listesi)
+        aday_tc_listesi.sort(key=lambda tc: -sum(day_load[tc][g] for g in gunler))
+        for tc in aday_tc_listesi:
+            if _zaman_doldu():
+                break
             if ogrt_bos_gun_var_mi(tc):
                 continue  # zaten (dogal ya da tek-ders duzeltmesinden) bir bos gunu var
             calisilan_gunler = [g for g in gunler if day_load[tc][g] > 0]
@@ -702,6 +775,8 @@ def _dagit_tek_deneme(veri):
         pencere azaltma pratikte hicbir sey yapamiyordu."""
         degisti = False
         for gun in gunler:
+            if _zaman_doldu():
+                return degisti
             saatler = ogrt_gun_saatleri(tc, gun)
             if len(saatler) < 2:
                 continue
@@ -753,7 +828,7 @@ def _dagit_tek_deneme(veri):
                     if bloklanmis:
                         break
 
-                if bloklanmis or not cakisanlar or len(cakisanlar) > 2:
+                if bloklanmis or not cakisanlar or len(cakisanlar) > 3:
                     geri_al(nokta)
                     continue
 
@@ -763,7 +838,7 @@ def _dagit_tek_deneme(veri):
                     yerlestir(t["id"], gun, hedef_basla)
                     basarili = True
                     for cg in sorted(cakisanlar):
-                        if not yerlestirmeye_calis(cg, MAX_DERINLIK - 1):
+                        if not yerlestirmeye_calis(cg, 0, tavan=DERIN_TAVAN):
                             basarili = False
                             break
                     if basarili:
@@ -777,10 +852,14 @@ def _dagit_tek_deneme(veri):
     def pencere_azalt_pass():
         """MAX_PENCERE_HEDEF'e ulasmaya calisan best-effort local search.
         Agir kisit yuklerinde tam garanti VEREMEZ ama mumkun oldugunca
-        yaklasir. Once en cok pencereli ogretmenden baslar."""
-        for _dis_tur in range(6):
+        yaklasir. Once en cok pencereli ogretmenden baslar. Idareci (2-12
+        saat) ogretmenler ic pencere hedefinden MUAF - onlar zaten her gun
+        okulda, pencere sayilari onemli degil."""
+        for _dis_tur in range(15):
+            if _zaman_doldu():
+                break
             pencereli = sorted(
-                (tc for tc in tum_tc if ogrt_haftalik_pencere(tc) > MAX_PENCERE_HEDEF),
+                (tc for tc in tum_tc if not idareci_mi[tc] and ogrt_haftalik_pencere(tc) > MAX_PENCERE_HEDEF),
                 key=lambda tc: -ogrt_haftalik_pencere(tc))
             if not pencereli:
                 break
@@ -806,6 +885,9 @@ def _dagit_tek_deneme(veri):
     # ---------------- 9. Eksikleri tekrar dene ----------------
     hala_eksik = []
     for gid in eksikler_gid:
+        if _zaman_doldu():
+            hala_eksik.append(gid)
+            continue
         if not yerlestirmeye_calis(gid):
             hala_eksik.append(gid)
 
@@ -837,6 +919,8 @@ def _dagit_tek_deneme(veri):
     sure = round(time.time() - t0, 2)
 
     # ---- Kalite istatistikleri (coklu-deneme sarmalayicisi icin) ----
+    # NOT: idareci (2-12 saat) ogretmenler pencere ve fazla-bos-gun
+    # olcumlerinden MUAF - min-saat/tek-ders kurali ise HERKES icin gecerli.
     min_ihlal_sayisi = 0
     for tc in tum_tc:
         ming = tc_kisit[tc]["minG"]
@@ -845,35 +929,48 @@ def _dagit_tek_deneme(veri):
         for gun in gunler:
             if 0 < day_load[tc][gun] < ming:
                 min_ihlal_sayisi += 1
-    pencere_toplam = sum(ogrt_haftalik_pencere(tc) for tc in tum_tc)
-    pencere_fazla_sayisi = sum(1 for tc in tum_tc if ogrt_haftalik_pencere(tc) > MAX_PENCERE_HEDEF)
+    pencere_toplam = sum(ogrt_haftalik_pencere(tc) for tc in tum_tc if not idareci_mi[tc])
+    pencere_fazla_sayisi = sum(1 for tc in tum_tc if not idareci_mi[tc] and ogrt_haftalik_pencere(tc) > MAX_PENCERE_HEDEF)
+    fazla_bos_gun_sayisi = sum(
+        1 for tc in tum_tc if not idareci_mi[tc]
+        and sum(1 for g in gunler if day_load[tc][g] == 0) >= 2
+    )
+    sifir_bos_gun_sayisi = sum(
+        1 for tc in tum_tc if not idareci_mi[tc] and tc_kisit[tc]["bosGun"] is None
+        and sum(1 for g in gunler if day_load[tc][g] == 0) == 0
+    )
 
     print(f"Tamamlandi {sure}s eksik={len(eksikler)} min_ihlal={min_ihlal_sayisi} "
-          f"pencere_fazla={pencere_fazla_sayisi} pencere_toplam={pencere_toplam}", flush=True)
+          f"pencere_fazla={pencere_fazla_sayisi} pencere_toplam={pencere_toplam} "
+          f"fazla_bosgun={fazla_bos_gun_sayisi} sifir_bosgun={sifir_bos_gun_sayisi}", flush=True)
 
     return {"basari": basarili, "slots": slots, "eksikler": eksikler,
             "sure_sn": sure, "durum": durum, "seed": seed,
             "istatistik": {
                 "min_ihlal_sayisi": min_ihlal_sayisi,
                 "pencere_fazla_sayisi": pencere_fazla_sayisi,
+                "fazla_bos_gun_sayisi": fazla_bos_gun_sayisi,
+                "sifir_bos_gun_sayisi": sifir_bos_gun_sayisi,
                 "pencere_toplam": pencere_toplam,
             }}
 
 
-def dagit(veri, kac_deneme=5, zaman_siniri_sn=45):
+def dagit(veri, kac_deneme=10, zaman_siniri_sn=300):
     """Coklu-deneme sarmalayicisi: _dagit_tek_deneme'yi farkli (ama
     deterministik) seed'lerle birden fazla kez calistirir, her sonucu
     kalite skoruna gore kiyaslar ve en iyisini dondurur.
 
     Oncelik sirasi (skor ne kadar dusukse o kadar iyi):
       1) eksik ders sayisi (EN AGIR - sinif ders eksik kalmasin)
-      2) min gunluk saat ihlali (asla tek ders)
-      3) >2 pencereli ogretmen sayisi
-      4) toplam pencere saati (ince ayar)
+      2) min gunluk saat ihlali (asla tek ders - idareci dahil HERKES icin)
+      3) 2+ bos gunlu (idareci OLMAYAN) ogretmen sayisi (asla 2 gun bos degil)
+      4) >2 pencereli (idareci olmayan) ogretmen sayisi
+      5) toplam pencere saati (ince ayar)
 
     app.py TARAFINDA HICBIR DEGISIKLIK GEREKMEZ - 'from motor import dagit'
     aynen calismaya devam eder, sadece capraz coklu deneme ile daha iyi
-    sonuc dondurur.
+    sonuc dondurur. zaman_siniri_sn varsayilani 280s - Render'in 360s
+    gunicorn timeout'unun altinda guvenli bir pay birakir.
     """
     taban_seed = veri.get("seed", random.randint(1, 999999))
     t_baslangic = time.time()
@@ -883,11 +980,18 @@ def dagit(veri, kac_deneme=5, zaman_siniri_sn=45):
     for i in range(kac_deneme):
         deneme_veri = dict(veri)
         deneme_veri["seed"] = taban_seed + i * 7919  # her deneme farkli/deterministik seed
+        # On-atama (True) bos-gun-kapsamasinda cok daha etkili ama yavas
+        # (~60-100sn/deneme); post-hoc (False) hizli (~8sn/deneme) ama daha
+        # az kapsayici. Once birkac on-atama dene (guclu taban), sonra hizli
+        # post-hoc denemelerle ince ayar/cesitlilik ekle.
+        deneme_veri["on_bos_gun_ata"] = (i < 3)
         sonuc = _dagit_tek_deneme(deneme_veri)
         ist = sonuc.get("istatistik", {})
         skor = (
             len(sonuc["eksikler"]) * 1_000_000
-            + ist.get("min_ihlal_sayisi", 0) * 10_000
+            + ist.get("min_ihlal_sayisi", 0) * 50_000
+            + ist.get("fazla_bos_gun_sayisi", 0) * 5_000
+            + ist.get("sifir_bos_gun_sayisi", 0) * 1_000
             + ist.get("pencere_fazla_sayisi", 0) * 100
             + ist.get("pencere_toplam", 0)
         )

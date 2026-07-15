@@ -1,32 +1,38 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from motor import dagit
-
 app = Flask(__name__)
 CORS(app, origins="*")
-
 @app.after_request
 def cors_headers(response):
     response.headers['Access-Control-Allow-Origin'] = '*'
     response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
     response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
     return response
-
 @app.route("/saglik", methods=["GET"])
 def saglik():
     return jsonify({"durum": "aktif", "versiyon": "1.0.0"})
-
 @app.route("/debug", methods=["POST"])
 def debug_veri():
-    """Frontend'den gelen kisitlari gosterir"""
-    import sys
+    """Frontend'den gelen kisitlari gosterir - brans/unvan gelip gelmedigini de kontrol eder"""
     veri = request.get_json(force=True)
     kisitlar = veri.get("kisitlar", {})
     ornek = {}
+    brans_olan = 0
+    unvan_olan = 0
+    for tc, k in kisitlar.items():
+        if k.get("brans"):
+            brans_olan += 1
+        if k.get("unvan"):
+            unvan_olan += 1
     for i, (tc, k) in enumerate(list(kisitlar.items())[:5]):
         ornek[tc[-6:]] = k
-    return jsonify({"kisit_sayisi": len(kisitlar), "ornek": ornek})
-
+    return jsonify({
+        "kisit_sayisi": len(kisitlar),
+        "brans_gelen_ogretmen_sayisi": brans_olan,
+        "unvan_gelen_ogretmen_sayisi": unvan_olan,
+        "ornek": ornek,
+    })
 @app.route("/dagit", methods=["POST", "OPTIONS"])
 def dagitim_yap():
     if request.method == "OPTIONS":
@@ -40,6 +46,5 @@ def dagitim_yap():
     except Exception as e:
         import traceback
         return jsonify({"basari": False, "hata": str(e), "detay": traceback.format_exc()}), 500
-
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=False)

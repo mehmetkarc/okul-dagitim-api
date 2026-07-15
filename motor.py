@@ -138,21 +138,34 @@ def _dagit_tek_deneme(veri):
             "kapaliSaat": kapali_saat,
             "minG":   int(k["minGunlukSaat"]) if k.get("minGunlukSaat") else None,
             "maxG":   int(k["maxGunlukSaat"]) if k.get("maxGunlukSaat") else None,
+            "brans":  (k.get("brans") or "").strip(),
+            "unvan":  (k.get("unvan") or "").strip(),
         }
     tc_kisit = {tc: kisit_al(tc) for tc in tum_tc}
 
-    # ---------------- 2b. Idareci muafiyeti (2-12 saat toplam yuku olanlar) ----------------
+    # ---------------- 2b. Idareci muafiyeti ----------------
     # Mudur/mudur yardimcisi gibi cok az ders saati olan ("ek ders") idareciler
     # zaten her gun okulda oldugundan bos gun/pencere hedefi onlar icin anlamsiz.
     # SADECE bos gun atama ve pencere azaltmadan MUAF tutulurlar - "asla tek ders"
     # kurali ONLAR ICIN DE gecerlidir (istisnasi yok).
+    # ONCELIK: unvan alani varsa ("Mudur Yardimcisi"/"Okul Muduru" icerenler)
+    # onu kullan - bu gercek veriden geldigi icin 2-12 saat tahmininden daha
+    # guvenilir. unvan yoksa eski sezgisel esige (2-12 saat) geri don.
     _toplam_yuk = {tc: 0 for tc in tum_tc}
     for g in gorevler:
         for tc in ([g["tc"]] + g["ek_tcler"] if g["tc"] else g["ek_tcler"]):
             if tc in _toplam_yuk:
                 _toplam_yuk[tc] += g["boy"]
     IDARECI_MIN_YUK, IDARECI_MAX_YUK = 2, 12
-    idareci_mi = {tc: (IDARECI_MIN_YUK <= _toplam_yuk[tc] <= IDARECI_MAX_YUK) for tc in tum_tc}
+
+    def _idareci_hesapla(tc):
+        unvan = tc_kisit[tc]["unvan"]
+        if unvan:
+            u = unvan.lower()
+            return "müdür" in u or "mudur" in u
+        return IDARECI_MIN_YUK <= _toplam_yuk[tc] <= IDARECI_MAX_YUK
+
+    idareci_mi = {tc: _idareci_hesapla(tc) for tc in tum_tc}
 
     # ---------------- 2c. (Opsiyonel) ON-ATAMA bos gun ----------------
     # Yerlestirmeden SONRA (zaten %100 dolu) bir gunu bosaltmaya calismak
@@ -891,6 +904,94 @@ def _dagit_tek_deneme(veri):
         if not yerlestirmeye_calis(gid):
             hala_eksik.append(gid)
 
+    # ---------------- 9b. Brans bazli ogretmen takasi (pencere azaltma - farkli yontem) ----------------
+    # Normal pencere azaltma "bos hucre" arar - %100 dolu sinifta bu genelde
+    # yok. Bu pass FARKLI bir yol dener: ayni BRANSTAN iki ogretmenin zaten
+    # yerlesmis, AYNI BOYDAKI iki blogunun ogretmen etiketini degistirir -
+    # gun/saat/sinif/ders HIC degismez, boylece sinif dolulugu asla bozulmaz.
+    # Sadece ikisinin de brans bilgisi varsa ve esitse calisir; unvan/brans
+    # verisi yoksa bu pass hicbir sey yapmaz (guvenli no-op).
+    def _brans_takasi_dene(tc1):
+        brans1 = tc_kisit[tc1]["brans"]
+        if not brans1:
+            return False
+        for gun in gunler:
+            saatler = ogrt_gun_saatleri(tc1, gun)
+            if len(saatler) < 2:
+                continue
+            mn, mx = min(saatler), max(saatler)
+            bos_saatler = set(range(mn, mx + 1)) - set(saatler)
+            if not bos_saatler:
+                continue
+            for tc2 in tum_tc:
+                if tc2 == tc1 or tc_kisit[tc2]["brans"] != brans1:
+                    continue
+                for g2 in gorevler:
+                    if not g2["placed"] or g2["placed"][0] != gun:
+                        continue
+                    if tc2 not in tum_ogrt(g2) or tc1 in tum_ogrt(g2):
+                        continue
+                    b_start = g2["placed"][1]
+                    boy2 = g2["boy"]
+                    if any((b_start + i) not in bos_saatler for i in range(boy2)):
+                        continue
+                    # tc1'in AYNI BOYDA, BASKA bir gundeki bir gorevini bul (takas icin)
+                    for g1 in gorevler:
+                        if (g1["placed"] and tc1 in tum_ogrt(g1) and tc2 not in tum_ogrt(g1)
+                                and g1["boy"] == boy2 and g1["placed"][0] != gun):
+                            if _takasi_uygula(g1["id"], g2["id"]):
+                                return True
+        return False
+
+    def _takasi_uygula(gid1, gid2):
+        g1, g2 = gid_map[gid1], gid_map[gid2]
+        tc1_eski, tc2_eski = g1["tc"], g2["tc"]
+        if tc1_eski == tc2_eski or not g1["placed"] or not g2["placed"]:
+            return False
+        gun1, saat1 = g1["placed"]
+        gun2, saat2 = g2["placed"]
+        ogrtler1_eski, ogrtler2_eski = g1["ogrtler"], g2["ogrtler"]
+        once = ihlal_sayisi()
+        nokta = kontrol_noktasi()
+        bosalt(gid1)
+        bosalt(gid2)
+        g1["tc"], g2["tc"] = tc2_eski, tc1_eski
+        g1["ogrtler"], g2["ogrtler"] = ogrtler2_eski, ogrtler1_eski
+        if musait_mi(gid1, gun1, saat1) and musait_mi(gid2, gun2, saat2):
+            yerlestir(gid1, gun1, saat1)
+            yerlestir(gid2, gun2, saat2)
+            if ihlal_sayisi() > once:
+                g1["tc"], g2["tc"] = tc1_eski, tc2_eski
+                g1["ogrtler"], g2["ogrtler"] = ogrtler1_eski, ogrtler2_eski
+                geri_al(nokta)
+                return False
+            return True
+        g1["tc"], g2["tc"] = tc1_eski, tc2_eski
+        g1["ogrtler"], g2["ogrtler"] = ogrtler1_eski, ogrtler2_eski
+        geri_al(nokta)
+        return False
+
+    def brans_takas_pass():
+        for _tur in range(10):
+            if _zaman_doldu():
+                break
+            pencereli = sorted(
+                (tc for tc in tum_tc if not idareci_mi[tc] and tc_kisit[tc]["brans"]
+                 and ogrt_haftalik_pencere(tc) > MAX_PENCERE_HEDEF),
+                key=lambda tc: -ogrt_haftalik_pencere(tc))
+            if not pencereli:
+                break
+            herhangi_degisti = False
+            for tc in pencereli:
+                if _zaman_doldu():
+                    break
+                if _brans_takasi_dene(tc):
+                    herhangi_degisti = True
+            if not herhangi_degisti:
+                break
+
+    brans_takas_pass()
+
     # ---------------- 10. Cikti ----------------
     slots = {sid: {} for sid in siniflar}
     for g in gorevler:
@@ -940,6 +1041,20 @@ def _dagit_tek_deneme(veri):
         and sum(1 for g in gunler if day_load[tc][g] == 0) == 0
     )
 
+    # ---- Ogretmen bazli pencere raporu (modal icin) ----
+    ogretmen_raporu = []
+    for tc in tum_tc:
+        bos_gun_sayisi = sum(1 for g in gunler if day_load[tc][g] == 0)
+        ogretmen_raporu.append({
+            "ogretmen_tc": tc,
+            "brans": tc_kisit[tc]["brans"] or None,
+            "unvan": tc_kisit[tc]["unvan"] or None,
+            "idareci": idareci_mi[tc],
+            "pencere": ogrt_haftalik_pencere(tc) if not idareci_mi[tc] else 0,
+            "bos_gun_sayisi": bos_gun_sayisi,
+        })
+    ogretmen_raporu.sort(key=lambda r: -r["pencere"])
+
     print(f"Tamamlandi {sure}s eksik={len(eksikler)} min_ihlal={min_ihlal_sayisi} "
           f"pencere_fazla={pencere_fazla_sayisi} pencere_toplam={pencere_toplam} "
           f"fazla_bosgun={fazla_bos_gun_sayisi} sifir_bosgun={sifir_bos_gun_sayisi}", flush=True)
@@ -952,6 +1067,7 @@ def _dagit_tek_deneme(veri):
                 "fazla_bos_gun_sayisi": fazla_bos_gun_sayisi,
                 "sifir_bos_gun_sayisi": sifir_bos_gun_sayisi,
                 "pencere_toplam": pencere_toplam,
+                "ogretmen_raporu": ogretmen_raporu,
             }}
 
 

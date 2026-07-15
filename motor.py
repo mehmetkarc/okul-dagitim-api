@@ -39,7 +39,7 @@ import random
 
 def _dagit_tek_deneme(veri):
     t0 = time.time()
-    _deneme_butcesi = float(veri.get("_deneme_butcesi_sn", 90 if veri.get("on_bos_gun_ata") else 40))
+    _deneme_butcesi = float(veri.get("_deneme_butcesi_sn", 70 if veri.get("on_bos_gun_ata") else 40))
 
     def _zaman_doldu():
         return time.time() - t0 > _deneme_butcesi
@@ -1071,7 +1071,7 @@ def _dagit_tek_deneme(veri):
             }}
 
 
-def dagit(veri, kac_deneme=10, zaman_siniri_sn=300):
+def dagit(veri, kac_deneme=8, zaman_siniri_sn=320):
     """Coklu-deneme sarmalayicisi: _dagit_tek_deneme'yi farkli (ama
     deterministik) seed'lerle birden fazla kez calistirir, her sonucu
     kalite skoruna gore kiyaslar ve en iyisini dondurur.
@@ -1079,13 +1079,14 @@ def dagit(veri, kac_deneme=10, zaman_siniri_sn=300):
     Oncelik sirasi (skor ne kadar dusukse o kadar iyi):
       1) eksik ders sayisi (EN AGIR - sinif ders eksik kalmasin)
       2) min gunluk saat ihlali (asla tek ders - idareci dahil HERKES icin)
-      3) 2+ bos gunlu (idareci OLMAYAN) ogretmen sayisi (asla 2 gun bos degil)
-      4) >2 pencereli (idareci olmayan) ogretmen sayisi
-      5) toplam pencere saati (ince ayar)
+      3) hic bos gunu OLMAYAN (idareci olmayan) ogretmen sayisi (EN AGIR bos-gun metrigi)
+      4) 2+ bos gunlu (idareci OLMAYAN) ogretmen sayisi (asla 2 gun bos degil)
+      5) >2 pencereli (idareci olmayan) ogretmen sayisi
+      6) toplam pencere saati (ince ayar)
 
     app.py TARAFINDA HICBIR DEGISIKLIK GEREKMEZ - 'from motor import dagit'
     aynen calismaya devam eder, sadece capraz coklu deneme ile daha iyi
-    sonuc dondurur. zaman_siniri_sn varsayilani 280s - Render'in 360s
+    sonuc dondurur. zaman_siniri_sn varsayilani 320s - Render'in 360s
     gunicorn timeout'unun altinda guvenli bir pay birakir.
     """
     taban_seed = veri.get("seed", random.randint(1, 999999))
@@ -1096,22 +1097,23 @@ def dagit(veri, kac_deneme=10, zaman_siniri_sn=300):
     for i in range(kac_deneme):
         deneme_veri = dict(veri)
         deneme_veri["seed"] = taban_seed + i * 7919  # her deneme farkli/deterministik seed
-        # On-atama (True) bos-gun-kapsamasinda cok daha etkili ama yavas
-        # (~60-100sn/deneme); post-hoc (False) hizli (~8sn/deneme) ama daha
-        # az kapsayici. Once birkac on-atama dene (guclu taban), sonra hizli
-        # post-hoc denemelerle ince ayar/cesitlilik ekle.
-        deneme_veri["on_bos_gun_ata"] = (i < 3)
+        # On-atama (True) bos-gun-kapsamasinda COK DAHA ETKILI (74 ogretmenden
+        # 0'i degil TAMAMI kapsanabiliyor) - bu yuzden ARTIK COGUNLUK bu
+        # stratejiyi kullanir. Son 2 deneme hizli post-hoc ile cesitlilik/
+        # yedek olarak kalir.
+        deneme_veri["on_bos_gun_ata"] = (i < kac_deneme - 2)
         sonuc = _dagit_tek_deneme(deneme_veri)
         ist = sonuc.get("istatistik", {})
         skor = (
             len(sonuc["eksikler"]) * 1_000_000
             + ist.get("min_ihlal_sayisi", 0) * 50_000
+            + ist.get("sifir_bos_gun_sayisi", 0) * 8_000
             + ist.get("fazla_bos_gun_sayisi", 0) * 5_000
-            + ist.get("sifir_bos_gun_sayisi", 0) * 1_000
             + ist.get("pencere_fazla_sayisi", 0) * 100
             + ist.get("pencere_toplam", 0)
         )
-        print(f"[deneme {i+1}/{kac_deneme}] seed={deneme_veri['seed']} skor={skor}", flush=True)
+        print(f"[deneme {i+1}/{kac_deneme}] on_bos_gun_ata={deneme_veri['on_bos_gun_ata']} "
+              f"seed={deneme_veri['seed']} skor={skor} istatistik={ist}", flush=True)
         if en_iyi is None or skor < en_iyi_skor:
             en_iyi = sonuc
             en_iyi_skor = skor

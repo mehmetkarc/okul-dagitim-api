@@ -1196,40 +1196,43 @@ def _dagit_tek_deneme(veri):
             }}
 
 
-def dagit(veri, kac_deneme=8, zaman_siniri_sn=320):
-    """Coklu-deneme sarmalayicisi: _dagit_tek_deneme'yi farkli (ama
-    deterministik) seed'lerle birden fazla kez calistirir, her sonucu
-    kalite skoruna gore kiyaslar ve en iyisini dondurur.
+def dagit(veri, kac_deneme=6, zaman_siniri_sn=120):
+    """Coklu-deneme sarmalayicisi - IKI ASAMALI:
+
+    ASAMA 1 (HIZLI TEMEL SONUC - guvenlik agi): once en hizli/guvenilir
+    strateji (on_bos_gun_ata=False, dusuk butce) ile TEK bir deneme yapilir.
+    Bu, Render gibi yavas donanimlarda bile ~genelde 10-40 saniyede biter ve
+    ELIMIZDE HER ZAMAN CALISAN (0 eksik hedefli) bir sonuc olmasini garanti
+    eder. Daha once TUM denemeler agir (on_bos_gun_ata=True, 70sn butceli)
+    stratejiyle basliyordu - bu, yavas sunucularda OR-Tools'un genel istek
+    zaman asimina (360sn) yaklasip yerel (COK daha zayif) motora
+    dusulmesine yol aciyordu. Artik ilk sonuc HER ZAMAN hizli gelir.
+
+    ASAMA 2 (ISTEGE BAGLI IYILESTIRME): kalan zaman butcesi varsa, bos gun/
+    pencere kalitesini artirmak icin ek denemeler yapilir (on_bos_gun_ata
+    agirlikli). Herhangi bir asamada suresi zaman_siniri_sn'i asarsa o ana
+    kadar bulunan EN IYI sonuc dondurulur.
 
     Oncelik sirasi (skor ne kadar dusukse o kadar iyi):
       1) eksik ders sayisi (EN AGIR - sinif ders eksik kalmasin)
-      2) min gunluk saat ihlali (asla tek ders - idareci dahil HERKES icin)
-      3) hic bos gunu OLMAYAN (idareci olmayan) ogretmen sayisi (EN AGIR bos-gun metrigi)
-      4) 2+ bos gunlu (idareci OLMAYAN) ogretmen sayisi (asla 2 gun bos degil)
+      2) fazla bos gun (2+ gunlu, idareci olmayan) - asla 2 gun bos degil
+      3) min gunluk saat ihlali (asla tek ders - idareci dahil HERKES icin)
+      4) hic bos gunu OLMAYAN (idareci olmayan) ogretmen sayisi
       5) >2 pencereli (idareci olmayan) ogretmen sayisi
       6) toplam pencere saati (ince ayar)
 
     app.py TARAFINDA HICBIR DEGISIKLIK GEREKMEZ - 'from motor import dagit'
-    aynen calismaya devam eder, sadece capraz coklu deneme ile daha iyi
-    sonuc dondurur. zaman_siniri_sn varsayilani 320s - Render'in 360s
-    gunicorn timeout'unun altinda guvenli bir pay birakir.
+    aynen calismaya devam eder. zaman_siniri_sn varsayilani 150s - Render'in
+    360s gunicorn timeout'una (ve frontend'in 360s fetch abort'una) COK
+    guvenli bir pay birakir, cunku Render'in gercek donanimi test
+    ortamindan cok daha yavas olabilir.
     """
     taban_seed = veri.get("seed", random.randint(1, 999999))
     t_baslangic = time.time()
-    en_iyi = None
-    en_iyi_skor = None
 
-    for i in range(kac_deneme):
-        deneme_veri = dict(veri)
-        deneme_veri["seed"] = taban_seed + i * 7919  # her deneme farkli/deterministik seed
-        # On-atama (True) bos-gun-kapsamasinda COK DAHA ETKILI (74 ogretmenden
-        # 0'i degil TAMAMI kapsanabiliyor) - bu yuzden ARTIK COGUNLUK bu
-        # stratejiyi kullanir. Son 2 deneme hizli post-hoc ile cesitlilik/
-        # yedek olarak kalir.
-        deneme_veri["on_bos_gun_ata"] = (i < kac_deneme - 2)
-        sonuc = _dagit_tek_deneme(deneme_veri)
+    def _skor_hesapla(sonuc):
         ist = sonuc.get("istatistik", {})
-        skor = (
+        return (
             len(sonuc["eksikler"]) * 1_000_000
             + ist.get("fazla_bos_gun_sayisi", 0) * 100_000
             + ist.get("min_ihlal_sayisi", 0) * 50_000
@@ -1237,9 +1240,31 @@ def dagit(veri, kac_deneme=8, zaman_siniri_sn=320):
             + ist.get("pencere_fazla_sayisi", 0) * 100
             + ist.get("pencere_toplam", 0)
         )
-        print(f"[deneme {i+1}/{kac_deneme}] on_bos_gun_ata={deneme_veri['on_bos_gun_ata']} "
-              f"seed={deneme_veri['seed']} skor={skor} istatistik={ist}", flush=True)
-        if en_iyi is None or skor < en_iyi_skor:
+
+    # ---- ASAMA 1: HIZLI TEMEL SONUC (guvenlik agi - HER ZAMAN calisir) ----
+    temel_veri = dict(veri)
+    temel_veri["seed"] = taban_seed
+    temel_veri["on_bos_gun_ata"] = False
+    temel_veri["_deneme_butcesi_sn"] = 40
+    en_iyi = _dagit_tek_deneme(temel_veri)
+    en_iyi_skor = _skor_hesapla(en_iyi)
+    print(f"[ASAMA 1 - temel] skor={en_iyi_skor} sure={en_iyi.get('sure_sn')}s "
+          f"eksik={len(en_iyi['eksikler'])}", flush=True)
+
+    # ---- ASAMA 2: ISTEGE BAGLI IYILESTIRME (kalan zaman varsa) ----
+    for i in range(kac_deneme - 1):
+        if time.time() - t_baslangic > zaman_siniri_sn:
+            print("Zaman siniri asildi (asama 2 baslamadan), temel sonucla devam ediliyor", flush=True)
+            break
+        deneme_veri = dict(veri)
+        deneme_veri["seed"] = taban_seed + (i + 1) * 7919
+        deneme_veri["on_bos_gun_ata"] = (i < kac_deneme - 3)
+        deneme_veri["_deneme_butcesi_sn"] = 40 if deneme_veri["on_bos_gun_ata"] else 25
+        sonuc = _dagit_tek_deneme(deneme_veri)
+        skor = _skor_hesapla(sonuc)
+        print(f"[ASAMA 2 - deneme {i+1}/{kac_deneme-1}] on_bos_gun_ata={deneme_veri['on_bos_gun_ata']} "
+              f"seed={deneme_veri['seed']} skor={skor} eksik={len(sonuc['eksikler'])}", flush=True)
+        if skor < en_iyi_skor:
             en_iyi = sonuc
             en_iyi_skor = skor
         if skor == 0:

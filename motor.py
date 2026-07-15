@@ -706,6 +706,25 @@ def _dagit_tek_deneme(veri):
 
     tek_ders_yasakla_pass()
 
+    # ---------------- 6b. Eksikleri tekrar dene (MUTLAK ONCELIK - digerlerinden ONCE) ----------------
+    # 'Tum dersler yerlessin' kurali en kritik olandir. Bu adim ISTEGE BAGLI
+    # optimizasyonlardan (bos gun, pencere, brans takasi) ONCE calisir ki
+    # zaman butcesi asilsa bile eksik-ders-yerlestirme suresi ASLA
+    # gasp edilmesin. Az sayida gorev kaldigindan (genelde 0-2) COK DAHA
+    # DERIN arama (DERIN_TAVAN) + tum-gunleri-deneyen kovma fallback
+    # kullanilir - kilitli hucre gibi ekstra kisitlarin daralttigi
+    # %100 dolu siniflarda bile son bir sansi tuketir.
+    hala_eksik = []
+    for gid in eksikler_gid:
+        if _zaman_doldu():
+            hala_eksik.append(gid)
+            continue
+        basarili = yerlestirmeye_calis(gid, 0, tavan=DERIN_TAVAN)
+        if not basarili:
+            basarili = kovarak_yerlestir_haric(gid, haric_gun=0)  # 0 = gecerli gun degil, hicbir gun haric tutulmaz
+        if not basarili:
+            hala_eksik.append(gid)
+
     # ---------------- 7. Otomatik bos gun atama (ISTEGE BAGLI - tek-ders kuralini ASLA bozmaz) ----------------
     def otomatik_bos_gun_pass():
         """Manuel bosGun'u OLMAYAN ve HENUZ hicbir bos gunu olmayan
@@ -946,14 +965,7 @@ def _dagit_tek_deneme(veri):
     fazla_bos_gun_konsolide_pass()
     tek_ders_yasakla_pass()  # konsolide de yeni tek-ders yaratmis olabilir
 
-    # ---------------- 9. Eksikleri tekrar dene ----------------
-    hala_eksik = []
-    for gid in eksikler_gid:
-        if _zaman_doldu():
-            hala_eksik.append(gid)
-            continue
-        if not yerlestirmeye_calis(gid):
-            hala_eksik.append(gid)
+    # ---------------- 9. (eksik tekrar deneme adimi 6b'ye tasindi) ----------------
 
     # ---------------- 9b. Brans bazli ogretmen takasi (pencere azaltma - farkli yontem) ----------------
     # Normal pencere azaltma "bos hucre" arar - %100 dolu sinifta bu genelde
@@ -1117,13 +1129,18 @@ def _dagit_tek_deneme(veri):
                 "ogretmenler": g["ogrtler"], "kilitli": False,
             }
 
+    # eksikler listesi TUM gorevlerin GUNCEL (su anki) durumundan taranir -
+    # sadece erken bir "hala_eksik" anlik goruntusune guvenmek, sonraki
+    # gecislerin (pencere/brans takasi vb.) sessizce bir gorevi yerinden
+    # oynatip birakma ihtimaline karsi kor kalirdi. Bu, son bir dogruluk
+    # kontrolu olarak TUM gorevleri tekrar tarar.
     eksikler = []
-    for gid in hala_eksik:
-        g = gid_map[gid]
-        eksikler.append({"sinif": siniflar[g["sid"]].get("sinif_adi"),
-                          "ders": dersler[g["did"]].get("ders_adi"), "blok": g["boy"]})
+    for g in gorevler:
+        if not g["placed"]:
+            eksikler.append({"sinif": siniflar[g["sid"]].get("sinif_adi"),
+                              "ders": dersler[g["did"]].get("ders_adi"), "blok": g["boy"]})
 
-    basarili = len(hala_eksik) == 0
+    basarili = len(eksikler) == 0
     durum = "OPTIMAL" if basarili else "PARTIAL"
     sure = round(time.time() - t0, 2)
 

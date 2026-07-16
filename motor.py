@@ -1196,24 +1196,22 @@ def _dagit_tek_deneme(veri):
             }}
 
 
-def dagit(veri, kac_deneme=3, zaman_siniri_sn=260):
+def dagit(veri, kac_deneme=4, zaman_siniri_sn=320):
     """Coklu-deneme sarmalayicisi - IKI ASAMALI:
 
     ASAMA 1 (HIZLI TEMEL SONUC - guvenlik agi): once en hizli/guvenilir
     strateji (on_bos_gun_ata=False, dusuk butce) ile TEK bir deneme yapilir.
     Boylece ELIMIZDE HER ZAMAN CALISAN (0 eksik) bir sonuc olur.
 
-    ASAMA 2 (ISTEGE BAGLI IYILESTIRME): once GUCLU (on_bos_gun_ata=True,
-    genis butceli) bir deneme yapilir - bos gun kapsamasi icin bu SART.
-    Render uzerinde OLCULEN gercek veri: sunucu test ortamindan ~2.5x
-    daha yavas (Asama 1: test ort. ~8sn -> Render ~20sn) VE on_bos_gun_ata=
-    True icin verilen kisa butce (25sn) yerlestirmeyi YARIDA KESIP 31-63
-    EKSIK DERSE yol aciyordu (bitmemis bir yerlestirme, bos-gun kapsamasi
-    degil, telafisi cok daha kotu bir sonuc). Bu yuzden guclu denemeye
-    ARTIK COK DAHA GENIS bir butce (150sn) veriliyor - bu butce SADECE
-    yeterli kalan zaman varsa baslatilir (asagidaki kontrol), yoksa hizli
-    guvenli denemeye dusulur. Boylece hem 'yarim yerlestirme' riski hem
-    'gunicorn/fetch 360sn timeout' riski ayni anda onlenir.
+    ASAMA 2 (ISTEGE BAGLI IYILESTIRME): GUCLU (on_bos_gun_ata=True) stratejiyi
+    ARDIŞIK IKI FARKLI SEED ile dener (tek bir uzun deneme yerine). Neden:
+    on_bos_gun_ata=True her ogretmene RASTGELE bir bosGun atar (rnd.shuffle);
+    bazi seed'lerde bu rastgele atama kotu bir kombinasyona denk gelip
+    (ornegin ayni sinifi paylasan cok sayida ogretmene ayni gun dusmesi)
+    GERCEKTEN COZULEMEYEN bir yerlestirmeye yol acabiliyor - bu bir zaman
+    sorunu degil, o SEED'e ozgu bir kisit-tatmin sorunu, bu yuzden 'daha
+    fazla sure vermek' tek basina cozum degil. Iki FARKLI seed denemek,
+    kotu bir rastgele atamanin butun sonucu batirma riskini azaltir.
 
     Oncelik sirasi (skor ne kadar dusukse o kadar iyi):
       1) eksik ders sayisi (EN AGIR - sinif ders eksik kalmasin)
@@ -1253,12 +1251,17 @@ def dagit(veri, kac_deneme=3, zaman_siniri_sn=260):
           f"eksik={len(en_iyi['eksikler'])} gecen_toplam={round(time.time()-t_baslangic,1)}s", flush=True)
 
     # ---- ASAMA 2: ISTEGE BAGLI IYILESTIRME (kalan zaman varsa) ----
-    GUCLU_BUTCE = 200   # on_bos_gun_ata=True icin - pencere_azalt_pass'e daha fazla sure kalsin diye artirildi
+    # Iki farkli seed ile GUCLU (on_bos_gun_ata=True) denenir (bkz. yukaridaki
+    # docstring - kotu bir rastgele atamaya karsi cesitlilik), sonra 1 hizli
+    # yedek. En kotu durum: 20(asama1) + 130*2(guclu) + 20(yedek) = 300sn -
+    # Render'in 360sn limitine hala ~60sn guvenli pay birakir.
+    GUCLU_BUTCE = 130   # on_bos_gun_ata=True icin - iki kez denenecegi icin makul tutuldu
     HIZLI_BUTCE = 20    # on_bos_gun_ata=False fallback/cesitlilik icin
+    GUCLU_DENEME_SAYISI = 2
 
     for i in range(kac_deneme - 1):
         kalan = zaman_siniri_sn - (time.time() - t_baslangic)
-        guclu_dene = (i < kac_deneme - 2) and kalan >= GUCLU_BUTCE
+        guclu_dene = (i < GUCLU_DENEME_SAYISI) and kalan >= GUCLU_BUTCE
         if kalan <= 5:
             print("Zaman siniri asildi (asama 2 baslamadan), en iyi sonucla devam ediliyor", flush=True)
             break

@@ -1196,7 +1196,7 @@ def _dagit_tek_deneme(veri):
             }}
 
 
-def dagit(veri, kac_deneme=6, zaman_siniri_sn=120):
+def dagit(veri, kac_deneme=6, zaman_siniri_sn=180):
     """Coklu-deneme sarmalayicisi - IKI ASAMALI:
 
     ASAMA 1 (HIZLI TEMEL SONUC - guvenlik agi): once en hizli/guvenilir
@@ -1259,7 +1259,11 @@ def dagit(veri, kac_deneme=6, zaman_siniri_sn=120):
         deneme_veri = dict(veri)
         deneme_veri["seed"] = taban_seed + (i + 1) * 7919
         deneme_veri["on_bos_gun_ata"] = (i < kac_deneme - 3)
-        deneme_veri["_deneme_butcesi_sn"] = 40 if deneme_veri["on_bos_gun_ata"] else 25
+        # 40sn on-atama icin cok kisaydi - eksik=0 + iyi bos-gun kapsamasina
+        # guvenilir sekilde ulasmak icin genelde 55-70sn gerekiyor. Genel
+        # zaman_siniri_sn zaten disaridan bir tavan koydugu icin buradaki
+        # butceyi tekrar gercekci seviyeye cikarmak guvenli.
+        deneme_veri["_deneme_butcesi_sn"] = 60 if deneme_veri["on_bos_gun_ata"] else 25
         sonuc = _dagit_tek_deneme(deneme_veri)
         skor = _skor_hesapla(sonuc)
         print(f"[ASAMA 2 - deneme {i+1}/{kac_deneme-1}] on_bos_gun_ata={deneme_veri['on_bos_gun_ata']} "

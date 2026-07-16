@@ -1228,14 +1228,23 @@ def dagit(veri, kac_deneme=4, zaman_siniri_sn=320):
     t_baslangic = time.time()
 
     def _skor_hesapla(sonuc):
+        """SIRALI (lexicographic) tuple dondurur - agirlikli toplam DEGIL.
+        Python tuple karsilastirmasi soldan saga once ilk farkli elemana
+        bakar - bu yuzden fazla_bos_gun_sayisi (2. sirada) HER ZAMAN
+        sifir_bos_gun_sayisi/pencere gibi 4-5. sıradaki degerlerden
+        MUTLAK oncelikli olur, sayisal agirlik dengesizligi olusamaz.
+        (Eskiden 63 tane 'hic bos gunu yok' ile 6 tane '2 gun bos' ayni
+        buyuklukte agirliklara denk gelip yanlislikla 2-gun ihlalli
+        sonucun kazanmasina yol aciyordu - bu artik yapisal olarak
+        imkansiz.)"""
         ist = sonuc.get("istatistik", {})
         return (
-            len(sonuc["eksikler"]) * 1_000_000
-            + ist.get("fazla_bos_gun_sayisi", 0) * 100_000
-            + ist.get("min_ihlal_sayisi", 0) * 50_000
-            + ist.get("sifir_bos_gun_sayisi", 0) * 8_000
-            + ist.get("pencere_fazla_sayisi", 0) * 100
-            + ist.get("pencere_toplam", 0)
+            len(sonuc["eksikler"]),                       # 1) asla eksik ders
+            ist.get("fazla_bos_gun_sayisi", 0),            # 2) asla 2+ bos gun
+            ist.get("min_ihlal_sayisi", 0),                # 3) asla tek ders
+            ist.get("sifir_bos_gun_sayisi", 0),             # 4) herkese bos gun
+            ist.get("pencere_fazla_sayisi", 0),             # 5) pencere <=2 hedefi
+            ist.get("pencere_toplam", 0),                   # 6) ince ayar
         )
 
     # ---- ASAMA 1: HIZLI TEMEL SONUC (guvenlik agi - HER ZAMAN calisir) ----
@@ -1293,7 +1302,7 @@ def dagit(veri, kac_deneme=4, zaman_siniri_sn=320):
         if skor < en_iyi_skor:
             en_iyi = sonuc
             en_iyi_skor = skor
-        if skor == 0:
+        if skor == (0, 0, 0, 0, 0, 0):
             break  # mukemmel sonuc bulundu, daha fazla denemeye gerek yok
         if time.time() - t_baslangic > zaman_siniri_sn:
             print("Zaman siniri asildi, en iyi sonucla devam ediliyor", flush=True)

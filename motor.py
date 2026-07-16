@@ -1196,17 +1196,19 @@ def _dagit_tek_deneme(veri):
             }}
 
 
-def dagit(veri, kac_deneme=6, zaman_siniri_sn=180):
+def dagit(veri, kac_deneme=5, zaman_siniri_sn=80):
     """Coklu-deneme sarmalayicisi - IKI ASAMALI:
 
     ASAMA 1 (HIZLI TEMEL SONUC - guvenlik agi): once en hizli/guvenilir
-    strateji (on_bos_gun_ata=False, dusuk butce) ile TEK bir deneme yapilir.
-    Bu, Render gibi yavas donanimlarda bile ~genelde 10-40 saniyede biter ve
-    ELIMIZDE HER ZAMAN CALISAN (0 eksik hedefli) bir sonuc olmasini garanti
-    eder. Daha once TUM denemeler agir (on_bos_gun_ata=True, 70sn butceli)
-    stratejiyle basliyordu - bu, yavas sunucularda OR-Tools'un genel istek
-    zaman asimina (360sn) yaklasip yerel (COK daha zayif) motora
-    dusulmesine yol aciyordu. Artik ilk sonuc HER ZAMAN hizli gelir.
+    strateji (on_bos_gun_ata=False, COK dusuk butce) ile TEK bir deneme
+    yapilir. Butceler agresif sekilde dusuk tutulur cunku Render gibi
+    paylasimli/ucretsiz sunucularin CPU hizi test ortamindan COK daha
+    yavas olabilir (dogrulandi: ayni butce degeri Render'da beklenenden
+    kat kat uzun surebiliyor). Ic butce kontrolleri (_zaman_doldu) her
+    zaman TAM olarak tutmayabilir (kontroller arasi tek bir agir islem
+    butceyi asabilir) - bu yuzden DIS zaman_siniri_sn cok daha kucuk
+    tutulur, boylece kotu ihtimalde bile 360sn'lik gunicorn/fetch
+    limitine COK uzak kalinir.
 
     ASAMA 2 (ISTEGE BAGLI IYILESTIRME): kalan zaman butcesi varsa, bos gun/
     pencere kalitesini artirmak icin ek denemeler yapilir (on_bos_gun_ata
@@ -1222,10 +1224,7 @@ def dagit(veri, kac_deneme=6, zaman_siniri_sn=180):
       6) toplam pencere saati (ince ayar)
 
     app.py TARAFINDA HICBIR DEGISIKLIK GEREKMEZ - 'from motor import dagit'
-    aynen calismaya devam eder. zaman_siniri_sn varsayilani 150s - Render'in
-    360s gunicorn timeout'una (ve frontend'in 360s fetch abort'una) COK
-    guvenli bir pay birakir, cunku Render'in gercek donanimi test
-    ortamindan cok daha yavas olabilir.
+    aynen calismaya devam eder.
     """
     taban_seed = veri.get("seed", random.randint(1, 999999))
     t_baslangic = time.time()
@@ -1245,11 +1244,11 @@ def dagit(veri, kac_deneme=6, zaman_siniri_sn=180):
     temel_veri = dict(veri)
     temel_veri["seed"] = taban_seed
     temel_veri["on_bos_gun_ata"] = False
-    temel_veri["_deneme_butcesi_sn"] = 40
+    temel_veri["_deneme_butcesi_sn"] = 20
     en_iyi = _dagit_tek_deneme(temel_veri)
     en_iyi_skor = _skor_hesapla(en_iyi)
     print(f"[ASAMA 1 - temel] skor={en_iyi_skor} sure={en_iyi.get('sure_sn')}s "
-          f"eksik={len(en_iyi['eksikler'])}", flush=True)
+          f"eksik={len(en_iyi['eksikler'])} gecen_toplam={round(time.time()-t_baslangic,1)}s", flush=True)
 
     # ---- ASAMA 2: ISTEGE BAGLI IYILESTIRME (kalan zaman varsa) ----
     for i in range(kac_deneme - 1):
@@ -1259,15 +1258,12 @@ def dagit(veri, kac_deneme=6, zaman_siniri_sn=180):
         deneme_veri = dict(veri)
         deneme_veri["seed"] = taban_seed + (i + 1) * 7919
         deneme_veri["on_bos_gun_ata"] = (i < kac_deneme - 3)
-        # 40sn on-atama icin cok kisaydi - eksik=0 + iyi bos-gun kapsamasina
-        # guvenilir sekilde ulasmak icin genelde 55-70sn gerekiyor. Genel
-        # zaman_siniri_sn zaten disaridan bir tavan koydugu icin buradaki
-        # butceyi tekrar gercekci seviyeye cikarmak guvenli.
-        deneme_veri["_deneme_butcesi_sn"] = 60 if deneme_veri["on_bos_gun_ata"] else 25
+        deneme_veri["_deneme_butcesi_sn"] = 25 if deneme_veri["on_bos_gun_ata"] else 15
         sonuc = _dagit_tek_deneme(deneme_veri)
         skor = _skor_hesapla(sonuc)
         print(f"[ASAMA 2 - deneme {i+1}/{kac_deneme-1}] on_bos_gun_ata={deneme_veri['on_bos_gun_ata']} "
-              f"seed={deneme_veri['seed']} skor={skor} eksik={len(sonuc['eksikler'])}", flush=True)
+              f"seed={deneme_veri['seed']} skor={skor} eksik={len(sonuc['eksikler'])} "
+              f"gecen_toplam={round(time.time()-t_baslangic,1)}s", flush=True)
         if skor < en_iyi_skor:
             en_iyi = sonuc
             en_iyi_skor = skor

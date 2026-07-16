@@ -11,7 +11,13 @@ def cors_headers(response):
     return response
 @app.route("/saglik", methods=["GET"])
 def saglik():
-    return jsonify({"durum": "aktif", "versiyon": "1.0.0"})
+    import motor as _motor_modul
+    return jsonify({
+        "durum": "aktif",
+        "versiyon": "2.0.0-asama-guvenlik",
+        "motor_dosya": _motor_modul.__file__,
+        "asama_yapisi_var_mi": hasattr(_motor_modul, "_dagit_tek_deneme"),
+    })
 @app.route("/debug", methods=["POST"])
 def debug_veri():
     """Frontend'den gelen kisitlari gosterir - brans/unvan gelip gelmedigini de kontrol eder"""

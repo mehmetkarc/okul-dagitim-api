@@ -339,7 +339,7 @@ def _dagit_tek_deneme(veri):
     # bazi tohumlarda 200+ saniyeye kadar patlayabiliyordu. Post-hoc modda
     # (varsayilan) 3 yeterli ve hizli.
     MAX_DERINLIK = 5 if veri.get("on_bos_gun_ata") else 3
-    DERIN_TAVAN = 6          # gec gecisler (tek-ders/bos-gun/pencere) icin - zaman siniri gevsek
+    DERIN_TAVAN = 8          # gec gecisler (tek-ders/bos-gun/pencere) icin - zaman siniri gevsek
 
     def kontrol_noktasi():
         """O(1) - sadece log uzunlugunu kaydeder."""
@@ -1196,7 +1196,7 @@ def _dagit_tek_deneme(veri):
             }}
 
 
-def dagit(veri, kac_deneme=3, zaman_siniri_sn=220):
+def dagit(veri, kac_deneme=3, zaman_siniri_sn=260):
     """Coklu-deneme sarmalayicisi - IKI ASAMALI:
 
     ASAMA 1 (HIZLI TEMEL SONUC - guvenlik agi): once en hizli/guvenilir
@@ -1251,7 +1251,7 @@ def dagit(veri, kac_deneme=3, zaman_siniri_sn=220):
           f"eksik={len(en_iyi['eksikler'])} gecen_toplam={round(time.time()-t_baslangic,1)}s", flush=True)
 
     # ---- ASAMA 2: ISTEGE BAGLI IYILESTIRME (kalan zaman varsa) ----
-    GUCLU_BUTCE = 150   # on_bos_gun_ata=True icin - Render'da ~2.5x yavaslik icin kalibre
+    GUCLU_BUTCE = 200   # on_bos_gun_ata=True icin - pencere_azalt_pass'e daha fazla sure kalsin diye artirildi
     HIZLI_BUTCE = 20    # on_bos_gun_ata=False fallback/cesitlilik icin
 
     for i in range(kac_deneme - 1):

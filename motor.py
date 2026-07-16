@@ -1239,6 +1239,9 @@ def dagit(veri, kac_deneme=4, zaman_siniri_sn=320):
         )
 
     # ---- ASAMA 1: HIZLI TEMEL SONUC (guvenlik agi - HER ZAMAN calisir) ----
+    tum_denemeler = []  # her denemenin ozet istatistigi - Render log erisimi
+                          # guvenilmez oldugu icin bunu DOGRUDAN API cevabina
+                          # koyuyoruz, tarayici konsolunda gorulebilsin diye.
     temel_veri = dict(veri)
     temel_veri["seed"] = taban_seed
     temel_veri["on_bos_gun_ata"] = False
@@ -1247,6 +1250,11 @@ def dagit(veri, kac_deneme=4, zaman_siniri_sn=320):
     en_iyi["_on_bos_gun_ata_kullanildi"] = False
     en_iyi["_kaynak"] = "asama1_temel"
     en_iyi_skor = _skor_hesapla(en_iyi)
+    tum_denemeler.append({
+        "kaynak": "asama1_temel", "on_bos_gun_ata": False, "skor": en_iyi_skor,
+        "eksik": len(en_iyi["eksikler"]), "sure_sn": en_iyi.get("sure_sn"),
+        "istatistik": en_iyi.get("istatistik"),
+    })
     print(f"[ASAMA 1 - temel] skor={en_iyi_skor} sure={en_iyi.get('sure_sn')}s "
           f"eksik={len(en_iyi['eksikler'])} gecen_toplam={round(time.time()-t_baslangic,1)}s", flush=True)
 
@@ -1273,6 +1281,12 @@ def dagit(veri, kac_deneme=4, zaman_siniri_sn=320):
         sonuc["_on_bos_gun_ata_kullanildi"] = guclu_dene
         sonuc["_kaynak"] = f"asama2_deneme{i+1}"
         skor = _skor_hesapla(sonuc)
+        tum_denemeler.append({
+            "kaynak": f"asama2_deneme{i+1}", "on_bos_gun_ata": guclu_dene, "skor": skor,
+            "eksik": len(sonuc["eksikler"]), "sure_sn": sonuc.get("sure_sn"),
+            "butce_sn": deneme_veri["_deneme_butcesi_sn"],
+            "istatistik": sonuc.get("istatistik"),
+        })
         print(f"[ASAMA 2 - deneme {i+1}/{kac_deneme-1}] on_bos_gun_ata={deneme_veri['on_bos_gun_ata']} "
               f"seed={deneme_veri['seed']} skor={skor} eksik={len(sonuc['eksikler'])} "
               f"gecen_toplam={round(time.time()-t_baslangic,1)}s", flush=True)
@@ -1287,6 +1301,7 @@ def dagit(veri, kac_deneme=4, zaman_siniri_sn=320):
 
     en_iyi["seed"] = taban_seed  # disariya orijinal seed'i raporla
     en_iyi["toplam_sure_sn"] = round(time.time() - t_baslangic, 2)  # TUM sarmalayicinin gercek suresi
+    en_iyi["_tum_denemeler"] = tum_denemeler  # tam deneme gecmisi (Render log gerektirmez)
     print(f"[SONUC] secilen_sure={en_iyi.get('sure_sn')}s TOPLAM_SARMALAYICI_SURESI={en_iyi['toplam_sure_sn']}s "
           f"secilen_on_bos_gun_ata={en_iyi.get('_on_bos_gun_ata_kullanildi', '?')}", flush=True)
     return en_iyi

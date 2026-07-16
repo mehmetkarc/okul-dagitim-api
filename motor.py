@@ -1246,6 +1246,8 @@ def dagit(veri, kac_deneme=3, zaman_siniri_sn=260):
     temel_veri["on_bos_gun_ata"] = False
     temel_veri["_deneme_butcesi_sn"] = 20
     en_iyi = _dagit_tek_deneme(temel_veri)
+    en_iyi["_on_bos_gun_ata_kullanildi"] = False
+    en_iyi["_kaynak"] = "asama1_temel"
     en_iyi_skor = _skor_hesapla(en_iyi)
     print(f"[ASAMA 1 - temel] skor={en_iyi_skor} sure={en_iyi.get('sure_sn')}s "
           f"eksik={len(en_iyi['eksikler'])} gecen_toplam={round(time.time()-t_baslangic,1)}s", flush=True)
@@ -1265,6 +1267,8 @@ def dagit(veri, kac_deneme=3, zaman_siniri_sn=260):
         deneme_veri["on_bos_gun_ata"] = guclu_dene
         deneme_veri["_deneme_butcesi_sn"] = GUCLU_BUTCE if guclu_dene else min(HIZLI_BUTCE, max(kalan - 2, 5))
         sonuc = _dagit_tek_deneme(deneme_veri)
+        sonuc["_on_bos_gun_ata_kullanildi"] = guclu_dene
+        sonuc["_kaynak"] = f"asama2_deneme{i+1}"
         skor = _skor_hesapla(sonuc)
         print(f"[ASAMA 2 - deneme {i+1}/{kac_deneme-1}] on_bos_gun_ata={deneme_veri['on_bos_gun_ata']} "
               f"seed={deneme_veri['seed']} skor={skor} eksik={len(sonuc['eksikler'])} "
@@ -1279,4 +1283,7 @@ def dagit(veri, kac_deneme=3, zaman_siniri_sn=260):
             break
 
     en_iyi["seed"] = taban_seed  # disariya orijinal seed'i raporla
+    en_iyi["toplam_sure_sn"] = round(time.time() - t_baslangic, 2)  # TUM sarmalayicinin gercek suresi
+    print(f"[SONUC] secilen_sure={en_iyi.get('sure_sn')}s TOPLAM_SARMALAYICI_SURESI={en_iyi['toplam_sure_sn']}s "
+          f"secilen_on_bos_gun_ata={en_iyi.get('_on_bos_gun_ata_kullanildi', '?')}", flush=True)
     return en_iyi

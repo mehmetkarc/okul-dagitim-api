@@ -1196,24 +1196,24 @@ def _dagit_tek_deneme(veri):
             }}
 
 
-def dagit(veri, kac_deneme=5, zaman_siniri_sn=80):
+def dagit(veri, kac_deneme=3, zaman_siniri_sn=220):
     """Coklu-deneme sarmalayicisi - IKI ASAMALI:
 
     ASAMA 1 (HIZLI TEMEL SONUC - guvenlik agi): once en hizli/guvenilir
-    strateji (on_bos_gun_ata=False, COK dusuk butce) ile TEK bir deneme
-    yapilir. Butceler agresif sekilde dusuk tutulur cunku Render gibi
-    paylasimli/ucretsiz sunucularin CPU hizi test ortamindan COK daha
-    yavas olabilir (dogrulandi: ayni butce degeri Render'da beklenenden
-    kat kat uzun surebiliyor). Ic butce kontrolleri (_zaman_doldu) her
-    zaman TAM olarak tutmayabilir (kontroller arasi tek bir agir islem
-    butceyi asabilir) - bu yuzden DIS zaman_siniri_sn cok daha kucuk
-    tutulur, boylece kotu ihtimalde bile 360sn'lik gunicorn/fetch
-    limitine COK uzak kalinir.
+    strateji (on_bos_gun_ata=False, dusuk butce) ile TEK bir deneme yapilir.
+    Boylece ELIMIZDE HER ZAMAN CALISAN (0 eksik) bir sonuc olur.
 
-    ASAMA 2 (ISTEGE BAGLI IYILESTIRME): kalan zaman butcesi varsa, bos gun/
-    pencere kalitesini artirmak icin ek denemeler yapilir (on_bos_gun_ata
-    agirlikli). Herhangi bir asamada suresi zaman_siniri_sn'i asarsa o ana
-    kadar bulunan EN IYI sonuc dondurulur.
+    ASAMA 2 (ISTEGE BAGLI IYILESTIRME): once GUCLU (on_bos_gun_ata=True,
+    genis butceli) bir deneme yapilir - bos gun kapsamasi icin bu SART.
+    Render uzerinde OLCULEN gercek veri: sunucu test ortamindan ~2.5x
+    daha yavas (Asama 1: test ort. ~8sn -> Render ~20sn) VE on_bos_gun_ata=
+    True icin verilen kisa butce (25sn) yerlestirmeyi YARIDA KESIP 31-63
+    EKSIK DERSE yol aciyordu (bitmemis bir yerlestirme, bos-gun kapsamasi
+    degil, telafisi cok daha kotu bir sonuc). Bu yuzden guclu denemeye
+    ARTIK COK DAHA GENIS bir butce (150sn) veriliyor - bu butce SADECE
+    yeterli kalan zaman varsa baslatilir (asagidaki kontrol), yoksa hizli
+    guvenli denemeye dusulur. Boylece hem 'yarim yerlestirme' riski hem
+    'gunicorn/fetch 360sn timeout' riski ayni anda onlenir.
 
     Oncelik sirasi (skor ne kadar dusukse o kadar iyi):
       1) eksik ders sayisi (EN AGIR - sinif ders eksik kalmasin)
@@ -1251,14 +1251,19 @@ def dagit(veri, kac_deneme=5, zaman_siniri_sn=80):
           f"eksik={len(en_iyi['eksikler'])} gecen_toplam={round(time.time()-t_baslangic,1)}s", flush=True)
 
     # ---- ASAMA 2: ISTEGE BAGLI IYILESTIRME (kalan zaman varsa) ----
+    GUCLU_BUTCE = 150   # on_bos_gun_ata=True icin - Render'da ~2.5x yavaslik icin kalibre
+    HIZLI_BUTCE = 20    # on_bos_gun_ata=False fallback/cesitlilik icin
+
     for i in range(kac_deneme - 1):
-        if time.time() - t_baslangic > zaman_siniri_sn:
-            print("Zaman siniri asildi (asama 2 baslamadan), temel sonucla devam ediliyor", flush=True)
+        kalan = zaman_siniri_sn - (time.time() - t_baslangic)
+        guclu_dene = (i < kac_deneme - 2) and kalan >= GUCLU_BUTCE
+        if kalan <= 5:
+            print("Zaman siniri asildi (asama 2 baslamadan), en iyi sonucla devam ediliyor", flush=True)
             break
         deneme_veri = dict(veri)
         deneme_veri["seed"] = taban_seed + (i + 1) * 7919
-        deneme_veri["on_bos_gun_ata"] = (i < kac_deneme - 3)
-        deneme_veri["_deneme_butcesi_sn"] = 25 if deneme_veri["on_bos_gun_ata"] else 15
+        deneme_veri["on_bos_gun_ata"] = guclu_dene
+        deneme_veri["_deneme_butcesi_sn"] = GUCLU_BUTCE if guclu_dene else min(HIZLI_BUTCE, max(kalan - 2, 5))
         sonuc = _dagit_tek_deneme(deneme_veri)
         skor = _skor_hesapla(sonuc)
         print(f"[ASAMA 2 - deneme {i+1}/{kac_deneme-1}] on_bos_gun_ata={deneme_veri['on_bos_gun_ata']} "

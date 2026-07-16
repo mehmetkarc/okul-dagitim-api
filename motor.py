@@ -798,6 +798,86 @@ def _dagit_tek_deneme(veri):
 
     fazla_bos_gun_konsolide_pass()
 
+    def _takasi_uygula(gid1, gid2):
+        g1, g2 = gid_map[gid1], gid_map[gid2]
+        tc1_eski, tc2_eski = g1["tc"], g2["tc"]
+        if tc1_eski == tc2_eski or not g1["placed"] or not g2["placed"]:
+            return False
+        gun1, saat1 = g1["placed"]
+        gun2, saat2 = g2["placed"]
+        ogrtler1_eski, ogrtler2_eski = g1["ogrtler"], g2["ogrtler"]
+        once_ihlal = ihlal_sayisi()
+        once_fazla = fazla_bos_gun_toplam()
+        nokta = kontrol_noktasi()
+        bosalt(gid1)
+        bosalt(gid2)
+        g1["tc"], g2["tc"] = tc2_eski, tc1_eski
+        g1["ogrtler"], g2["ogrtler"] = ogrtler2_eski, ogrtler1_eski
+        if musait_mi(gid1, gun1, saat1) and musait_mi(gid2, gun2, saat2):
+            yerlestir(gid1, gun1, saat1)
+            yerlestir(gid2, gun2, saat2)
+            if ihlal_sayisi() > once_ihlal or fazla_bos_gun_toplam() > once_fazla:
+                g1["tc"], g2["tc"] = tc1_eski, tc2_eski
+                g1["ogrtler"], g2["ogrtler"] = ogrtler1_eski, ogrtler2_eski
+                geri_al(nokta)
+                return False
+            return True
+        g1["tc"], g2["tc"] = tc1_eski, tc2_eski
+        g1["ogrtler"], g2["ogrtler"] = ogrtler1_eski, ogrtler2_eski
+        geri_al(nokta)
+        return False
+
+    # ---------------- 9b. Fazla bos gunu BRANS TAKASIYLA doldurmayi zorla ----------------
+    # fazla_bos_gun_konsolide_pass (dogrudan doldur/swap) bazi ogretmenler icin
+    # basarisiz kalabiliyor (hedef sinif zaten dolu). Bu son care: o gundeki
+    # AYNI BRANSTAN baska bir ogretmenin dersini TAKAS ederek (sinif/saat hic
+    # degismeden, sadece kim ogrettigi degisir) o gunu doldurmaya calisir -
+    # boylece hedef sinifin dolu olmasi sorun olmaktan cikar.
+    def _ogretmenin_fazla_gunleri(tc):
+        korunacak_gun = tc_kisit[tc]["bosGun"]
+        if korunacak_gun is not None:
+            return [g for g in gunler if day_load[tc][g] == 0 and g != korunacak_gun]
+        tum_bos = [g for g in gunler if day_load[tc][g] == 0]
+        return tum_bos[1:] if len(tum_bos) > 1 else []
+
+    def _fazla_bos_gun_brans_takasi_dene(tc):
+        brans = tc_kisit[tc]["brans"]
+        if not brans:
+            return False
+        for fazla_gun in _ogretmenin_fazla_gunleri(tc):
+            adaylar_g2 = [g2 for g2 in gorevler
+                          if g2["placed"] and g2["placed"][0] == fazla_gun
+                          and g2["tc"] and g2["tc"] != tc
+                          and tc_kisit.get(g2["tc"], {}).get("brans") == brans]
+            for g2 in adaylar_g2:
+                boy2 = g2["boy"]
+                adaylar_g1 = [g1 for g1 in gorevler
+                              if g1["placed"] and tc in tum_ogrt(g1) and g1["boy"] == boy2
+                              and g1["placed"][0] != fazla_gun]
+                for g1 in adaylar_g1:
+                    if _takasi_uygula(g1["id"], g2["id"]):
+                        return True
+        return False
+
+    def fazla_bos_gun_brans_takas_pass():
+        for _tur in range(10):
+            if _zaman_doldu():
+                break
+            hedefler = [tc for tc in tum_tc if not idareci_mi[tc] and tc_kisit[tc]["brans"]
+                        and _ogretmenin_fazla_gunleri(tc)]
+            if not hedefler:
+                break
+            degisti = False
+            for tc in hedefler:
+                if _zaman_doldu():
+                    break
+                if _fazla_bos_gun_brans_takasi_dene(tc):
+                    degisti = True
+            if not degisti:
+                break
+
+    fazla_bos_gun_brans_takas_pass()
+
     # ---------------- 7c. Son tek-ders temizligi (bos gun gecisi yan etki yaratmis olabilir) ----------------
     tek_ders_yasakla_pass()
 
@@ -1006,35 +1086,6 @@ def _dagit_tek_deneme(veri):
                                 return True
         return False
 
-    def _takasi_uygula(gid1, gid2):
-        g1, g2 = gid_map[gid1], gid_map[gid2]
-        tc1_eski, tc2_eski = g1["tc"], g2["tc"]
-        if tc1_eski == tc2_eski or not g1["placed"] or not g2["placed"]:
-            return False
-        gun1, saat1 = g1["placed"]
-        gun2, saat2 = g2["placed"]
-        ogrtler1_eski, ogrtler2_eski = g1["ogrtler"], g2["ogrtler"]
-        once_ihlal = ihlal_sayisi()
-        once_fazla = fazla_bos_gun_toplam()
-        nokta = kontrol_noktasi()
-        bosalt(gid1)
-        bosalt(gid2)
-        g1["tc"], g2["tc"] = tc2_eski, tc1_eski
-        g1["ogrtler"], g2["ogrtler"] = ogrtler2_eski, ogrtler1_eski
-        if musait_mi(gid1, gun1, saat1) and musait_mi(gid2, gun2, saat2):
-            yerlestir(gid1, gun1, saat1)
-            yerlestir(gid2, gun2, saat2)
-            if ihlal_sayisi() > once_ihlal or fazla_bos_gun_toplam() > once_fazla:
-                g1["tc"], g2["tc"] = tc1_eski, tc2_eski
-                g1["ogrtler"], g2["ogrtler"] = ogrtler1_eski, ogrtler2_eski
-                geri_al(nokta)
-                return False
-            return True
-        g1["tc"], g2["tc"] = tc1_eski, tc2_eski
-        g1["ogrtler"], g2["ogrtler"] = ogrtler1_eski, ogrtler2_eski
-        geri_al(nokta)
-        return False
-
     def brans_takas_pass():
         for _tur in range(10):
             if _zaman_doldu():
@@ -1056,60 +1107,10 @@ def _dagit_tek_deneme(veri):
 
     brans_takas_pass()
 
-    # ---------------- 9b. Fazla bos gunu BRANS TAKASIYLA doldurmayi zorla ----------------
-    # fazla_bos_gun_konsolide_pass (dogrudan doldur/swap) bazi ogretmenler icin
-    # basarisiz kalabiliyor (hedef sinif zaten dolu). Bu son care: o gundeki
-    # AYNI BRANSTAN baska bir ogretmenin dersini TAKAS ederek (sinif/saat hic
-    # degismeden, sadece kim ogrettigi degisir) o gunu doldurmaya calisir -
-    # boylece hedef sinifin dolu olmasi sorun olmaktan cikar.
-    def _ogretmenin_fazla_gunleri(tc):
-        korunacak_gun = tc_kisit[tc]["bosGun"]
-        if korunacak_gun is not None:
-            return [g for g in gunler if day_load[tc][g] == 0 and g != korunacak_gun]
-        tum_bos = [g for g in gunler if day_load[tc][g] == 0]
-        return tum_bos[1:] if len(tum_bos) > 1 else []
-
-    def _fazla_bos_gun_brans_takasi_dene(tc):
-        brans = tc_kisit[tc]["brans"]
-        if not brans:
-            return False
-        for fazla_gun in _ogretmenin_fazla_gunleri(tc):
-            adaylar_g2 = [g2 for g2 in gorevler
-                          if g2["placed"] and g2["placed"][0] == fazla_gun
-                          and g2["tc"] and g2["tc"] != tc
-                          and tc_kisit.get(g2["tc"], {}).get("brans") == brans]
-            for g2 in adaylar_g2:
-                boy2 = g2["boy"]
-                adaylar_g1 = [g1 for g1 in gorevler
-                              if g1["placed"] and tc in tum_ogrt(g1) and g1["boy"] == boy2
-                              and g1["placed"][0] != fazla_gun]
-                for g1 in adaylar_g1:
-                    if _takasi_uygula(g1["id"], g2["id"]):
-                        return True
-        return False
-
-    def fazla_bos_gun_brans_takas_pass():
-        for _tur in range(10):
-            if _zaman_doldu():
-                break
-            hedefler = [tc for tc in tum_tc if not idareci_mi[tc] and tc_kisit[tc]["brans"]
-                        and _ogretmenin_fazla_gunleri(tc)]
-            if not hedefler:
-                break
-            degisti = False
-            for tc in hedefler:
-                if _zaman_doldu():
-                    break
-                if _fazla_bos_gun_brans_takasi_dene(tc):
-                    degisti = True
-            if not degisti:
-                break
-
-    fazla_bos_gun_brans_takas_pass()
-
     # ---------------- 9c. Son guvenlik taramasi ----------------
     tek_ders_yasakla_pass()
     fazla_bos_gun_konsolide_pass()
+    fazla_bos_gun_brans_takas_pass()
     tek_ders_yasakla_pass()
 
     # ---------------- 10. Cikti ----------------

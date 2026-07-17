@@ -1197,7 +1197,7 @@ def _dagit_tek_deneme(veri):
             }}
 
 
-def dagit(veri, kac_deneme=4, zaman_siniri_sn=320):
+def dagit(veri, kac_deneme=3, zaman_siniri_sn=320):
     """Coklu-deneme sarmalayicisi - IKI ASAMALI:
 
     ASAMA 1 (HIZLI TEMEL SONUC - guvenlik agi): once en hizli/guvenilir
@@ -1274,13 +1274,17 @@ def dagit(veri, kac_deneme=4, zaman_siniri_sn=320):
           f"eksik={len(en_iyi['eksikler'])} gecen_toplam={round(time.time()-t_baslangic,1)}s", flush=True)
 
     # ---- ASAMA 2: ISTEGE BAGLI IYILESTIRME (kalan zaman varsa) ----
-    # Iki farkli seed ile GUCLU (on_bos_gun_ata=True) denenir (bkz. yukaridaki
-    # docstring - kotu bir rastgele atamaya karsi cesitlilik), sonra 1 hizli
-    # yedek. En kotu durum: 20(asama1) + 130*2(guclu) + 20(yedek) = 300sn -
-    # Render'in 360sn limitine hala ~60sn guvenli pay birakir.
-    GUCLU_BUTCE = 130   # on_bos_gun_ata=True icin - iki kez denenecegi icin makul tutuldu
+    # TEK UZUN guclu (on_bos_gun_ata=True) deneme yapilir - iki kisa deneme
+    # yerine. GOZLEM: 130sn'lik butce bazen ANA YERLESTIRMENIN BILE
+    # TAMAMLANMASINA yetmiyor (8-61 eksik gibi ciddi hatalarla sonuclaniyor,
+    # bu bir 'optimizasyon eksikligi' degil, 'yerlestirme yarida kesildi'
+    # demek). Iki kez 130sn denemek yerine BIR kez 260sn denemek, tek
+    # denemenin surekli/kesintisiz calisip TAMAMLANMA sansini artirir.
+    # En kotu durum: 20(asama1) + 260(guclu) + 20(yedek) = 300sn - Render'in
+    # 360sn limitine hala ~60sn guvenli pay birakir.
+    GUCLU_BUTCE = 260   # on_bos_gun_ata=True icin - TEK deneme, kesintisiz calissin diye genis tutuldu
     HIZLI_BUTCE = 20    # on_bos_gun_ata=False fallback/cesitlilik icin
-    GUCLU_DENEME_SAYISI = 2
+    GUCLU_DENEME_SAYISI = 1
 
     for i in range(kac_deneme - 1):
         kalan = zaman_siniri_sn - (time.time() - t_baslangic)

@@ -1231,21 +1231,26 @@ def dagit(veri, kac_deneme=4, zaman_siniri_sn=320):
     def _skor_hesapla(sonuc):
         """SIRALI (lexicographic) tuple dondurur - agirlikli toplam DEGIL.
         Python tuple karsilastirmasi soldan saga once ilk farkli elemana
-        bakar - bu yuzden fazla_bos_gun_sayisi (2. sirada) HER ZAMAN
-        sifir_bos_gun_sayisi/pencere gibi 4-5. sıradaki degerlerden
-        MUTLAK oncelikli olur, sayisal agirlik dengesizligi olusamaz.
-        (Eskiden 63 tane 'hic bos gunu yok' ile 6 tane '2 gun bos' ayni
-        buyuklukte agirliklara denk gelip yanlislikla 2-gun ihlalli
-        sonucun kazanmasina yol aciyordu - bu artik yapisal olarak
-        imkansiz.)"""
+        bakar - bu yuzden erken sıradaki bir metrik HER ZAMAN sonraki
+        metriklerden MUTLAK oncelikli olur, sayisal agirlik dengesizligi
+        olusamaz.
+
+        KULLANICI KARARI (degistirildi): idareci disindaki HERKESE bos gun
+        VERILMESI (kapsama), 'fazla bos gun' (2+ gunlu) sayisindan DAHA
+        ONCELIKLI. Kullanici bu ihlalleri (varsa) kendisi manuel kontrol
+        edip duzeltecegini belirtti - sistem ARTIK once kapsamayi
+        maksimize etmeye calisir, fazla-bos-gun hala takip edilir/
+        azaltilmaya calisilir (motor.py'nin ic gecisleri - konsolide_pass,
+        brans_takas_pass - HALA bunu 0'a indirmeye calisiyor) ama SEÇİMİ
+        artik bloke etmiyor."""
         ist = sonuc.get("istatistik", {})
         return (
-            len(sonuc["eksikler"]),                       # 1) asla eksik ders
-            ist.get("fazla_bos_gun_sayisi", 0),            # 2) asla 2+ bos gun
-            ist.get("min_ihlal_sayisi", 0),                # 3) asla tek ders
-            ist.get("sifir_bos_gun_sayisi", 0),             # 4) herkese bos gun
-            ist.get("pencere_fazla_sayisi", 0),             # 5) pencere <=2 hedefi
-            ist.get("pencere_toplam", 0),                   # 6) ince ayar
+            len(sonuc["eksikler"]),                        # 1) asla eksik ders
+            ist.get("min_ihlal_sayisi", 0),                 # 2) asla tek ders
+            ist.get("sifir_bos_gun_sayisi", 0),              # 3) herkese bos gun (kullanici karari: bunu on plana al)
+            ist.get("fazla_bos_gun_sayisi", 0),              # 4) fazla bos gun - hala azaltilir ama artik ikincil
+            ist.get("pencere_fazla_sayisi", 0),              # 5) pencere <=2 hedefi
+            ist.get("pencere_toplam", 0),                    # 6) ince ayar
         )
 
     # ---- ASAMA 1: HIZLI TEMEL SONUC (guvenlik agi - HER ZAMAN calisir) ----

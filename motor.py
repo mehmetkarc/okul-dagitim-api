@@ -1158,6 +1158,7 @@ def _dagit_tek_deneme(veri):
                 min_ihlal_sayisi += 1
     pencere_toplam = sum(ogrt_haftalik_pencere(tc) for tc in tum_tc if not idareci_mi[tc])
     pencere_fazla_sayisi = sum(1 for tc in tum_tc if not idareci_mi[tc] and ogrt_haftalik_pencere(tc) > MAX_PENCERE_HEDEF)
+    pencere_max = max((ogrt_haftalik_pencere(tc) for tc in tum_tc if not idareci_mi[tc]), default=0)
     fazla_bos_gun_sayisi = sum(
         1 for tc in tum_tc if not idareci_mi[tc]
         and sum(1 for g in gunler if day_load[tc][g] == 0) >= 2
@@ -1182,7 +1183,7 @@ def _dagit_tek_deneme(veri):
     ogretmen_raporu.sort(key=lambda r: -r["pencere"])
 
     print(f"Tamamlandi {sure}s eksik={len(eksikler)} min_ihlal={min_ihlal_sayisi} "
-          f"pencere_fazla={pencere_fazla_sayisi} pencere_toplam={pencere_toplam} "
+          f"pencere_fazla={pencere_fazla_sayisi} pencere_max={pencere_max} pencere_toplam={pencere_toplam} "
           f"fazla_bosgun={fazla_bos_gun_sayisi} sifir_bosgun={sifir_bos_gun_sayisi}", flush=True)
 
     return {"basari": basarili, "slots": slots, "eksikler": eksikler,
@@ -1190,6 +1191,7 @@ def _dagit_tek_deneme(veri):
             "istatistik": {
                 "min_ihlal_sayisi": min_ihlal_sayisi,
                 "pencere_fazla_sayisi": pencere_fazla_sayisi,
+                "pencere_max": pencere_max,
                 "fazla_bos_gun_sayisi": fazla_bos_gun_sayisi,
                 "sifir_bos_gun_sayisi": sifir_bos_gun_sayisi,
                 "pencere_toplam": pencere_toplam,
@@ -1204,25 +1206,23 @@ def hesapla_skor(sonuc):
     metriklerden MUTLAK oncelikli olur, sayisal agirlik dengesizligi
     olusamaz.
 
-    KULLANICI KARARI: idareci disindaki HERKESE bos gun VERILMESI
-    (kapsama), 'fazla bos gun' (2+ gunlu) sayisindan DAHA ONCELIKLI.
-    Kullanici bu ihlalleri (varsa) kendisi manuel kontrol edip
-    duzeltecegini belirtti - sistem once kapsamayi maksimize etmeye
-    calisir, fazla-bos-gun hala takip edilir/azaltilmaya calisilir
-    (motor.py'nin ic gecisleri - konsolide_pass, brans_takas_pass -
-    HALA bunu 0'a indirmeye calisiyor) ama SEÇİMİ artik bloke etmiyor.
-
-    Bu fonksiyon MODUL SEVIYESINDE (dagit() disinda) tanimlanmistir ki
-    hem dagit() hem arka_plan_arama() hem de app.py/dagit_yerel.py AYNI
-    fonksiyonu kullanabilsin - tutarli siralama garanti edilir."""
+    KULLANICI KARARI (SON - KESIN): 'asla 2 gun bos verilemez' kurali
+    MEB yonetmeligine dayanan MUTLAK bir kisittir - bos-gun kapsamasindan
+    (sifir_bos_gun) bile ONCELIKLIDIR. Ayrica pencere DAGILIMI da adil
+    olmali - bir ogretmen 0 pencereyken baskasi 12 pencereye sahip
+    olmamali; bu yuzden pencere_max (en yuksek tekil pencere degeri)
+    pencere_toplam'dan ONCE gelir - once EN KOTU durumdaki ogretmeni
+    iyilestirmeye calisir, sonra genel toplami.
+    """
     ist = sonuc.get("istatistik", {})
     return (
         len(sonuc["eksikler"]),                        # 1) asla eksik ders
         ist.get("min_ihlal_sayisi", 0),                 # 2) asla tek ders
-        ist.get("sifir_bos_gun_sayisi", 0),              # 3) herkese bos gun (kullanici karari: bunu on plana al)
-        ist.get("fazla_bos_gun_sayisi", 0),              # 4) fazla bos gun - hala azaltilir ama artik ikincil
-        ist.get("pencere_fazla_sayisi", 0),              # 5) pencere <=2 hedefi
-        ist.get("pencere_toplam", 0),                    # 6) ince ayar
+        ist.get("fazla_bos_gun_sayisi", 0),              # 3) asla 2+ bos gun (MEB) - MUTLAK
+        ist.get("sifir_bos_gun_sayisi", 0),              # 4) herkese bos gun (kapsama)
+        ist.get("pencere_fazla_sayisi", 0),              # 5) pencere <=2 hedefine ulasan sayisi
+        ist.get("pencere_max", 0),                       # 6) ADALET: en kotu tekil pencere degeri
+        ist.get("pencere_toplam", 0),                    # 7) genel toplam (ince ayar)
     )
 
 
@@ -1253,7 +1253,7 @@ def arka_plan_arama(veri, sure_sn, ilerleme_fn=None, durdur_fn=None, tur_butcesi
     en_iyi_sonuc = None
     en_iyi_skor = None
     tur_no = 0
-    mukemmel = (0, 0, 0, 0, 0, 0)
+    mukemmel = (0, 0, 0, 0, 0, 0, 0)
 
     while time.time() - t0 < sure_sn:
         if durdur_fn is not None and durdur_fn():
@@ -1373,7 +1373,7 @@ def dagit(veri, kac_deneme=3, zaman_siniri_sn=320):
         if skor < en_iyi_skor:
             en_iyi = sonuc
             en_iyi_skor = skor
-        if skor == (0, 0, 0, 0, 0, 0):
+        if skor == (0, 0, 0, 0, 0, 0, 0):
             break  # mukemmel sonuc bulundu, daha fazla denemeye gerek yok
         if time.time() - t_baslangic > zaman_siniri_sn:
             print("Zaman siniri asildi, en iyi sonucla devam ediliyor", flush=True)

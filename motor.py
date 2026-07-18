@@ -759,6 +759,7 @@ def _dagit_tek_deneme(veri):
                     if ihlal_sayisi() > once:
                         geri_al(nokta)  # yeni tek-ders ihlali yaratti - kabul edilemez
                         continue
+                    tc_kisit[tc]["bosGun"] = aday_gun  # KILITLE - sonraki gecisler (pencere/takas) asla dokunmasin
                     break  # basarili VE tek-ders kuralini bozmadi
 
     otomatik_bos_gun_pass()
@@ -877,6 +878,62 @@ def _dagit_tek_deneme(veri):
                 break
 
     fazla_bos_gun_brans_takas_pass()
+
+    # ---------------- 7b2. Bos gun ALAMAYAN ogretmenler icin BRANS TAKASI ----------------
+    # otomatik_bos_gun_pass sadece kovma/dogrudan-tasima dener - bu, o gunku
+    # TUM derslerin (potansiyel olarak birden fazla FARKLI sinifa ait) AYNI
+    # ANDA baska bosluklara sigmasini gerektirir; %100 dolu siniflarda bu
+    # sik sik BASARISIZ olur. Bu gecis, fazla_bos_gun_brans_takas_pass'ta
+    # ISE YARAYAN yontemi kullanir: o gundeki her ders icin, sinifin/saatin
+    # HIC degismedigi, sadece AYNI BRANSTAN baska bir ogretmenle 'kim
+    # ogretiyor' takasi yapilir - boylece bos hucre aramaya hic gerek kalmaz.
+    def _gun_bosalt_brans_takasi_dene(tc, hedef_gun):
+        brans = tc_kisit[tc]["brans"]
+        if not brans:
+            return False
+        gorev_listesi = [g for g in gorevler if g["placed"] and g["placed"][0] == hedef_gun and tc in tum_ogrt(g)]
+        if not gorev_listesi:
+            return False
+        for g1 in gorev_listesi:
+            boy1 = g1["boy"]
+            adaylar_g2 = [g2 for g2 in gorevler
+                          if g2["placed"] and g2["placed"][0] != hedef_gun
+                          and g2["boy"] == boy1 and g2["tc"] and g2["tc"] != tc
+                          and tc_kisit.get(g2["tc"], {}).get("brans") == brans]
+            for g2 in adaylar_g2:
+                if tc in tum_ogrt(g2):
+                    continue  # tc zaten bu gorevde (ek_tcler) - takas anlamsiz
+                if _takasi_uygula(g1["id"], g2["id"]):
+                    return True
+        return False
+
+    def otomatik_bos_gun_brans_takas_pass():
+        for _tur in range(10):
+            if _zaman_doldu():
+                break
+            hedefler = [tc for tc in tum_tc if not idareci_mi[tc] and tc_kisit[tc]["bosGun"] is None
+                        and not ogrt_bos_gun_var_mi(tc) and tc_kisit[tc]["brans"]]
+            if not hedefler:
+                break
+            degisti = False
+            for tc in hedefler:
+                if _zaman_doldu():
+                    break
+                calisilan = [g for g in gunler if day_load[tc][g] > 0]
+                if len(calisilan) <= 1:
+                    continue
+                for hedef_gun in sorted(calisilan, key=lambda g: day_load[tc][g]):
+                    if day_load[tc][hedef_gun] == 0:
+                        break
+                    _gun_bosalt_brans_takasi_dene(tc, hedef_gun)
+                    if day_load[tc][hedef_gun] == 0:
+                        tc_kisit[tc]["bosGun"] = hedef_gun  # KILITLE - sonraki gecisler dokunmasin
+                        degisti = True
+                        break
+            if not degisti:
+                break
+
+    otomatik_bos_gun_brans_takas_pass()
 
     # ---------------- 7c. Son tek-ders temizligi (bos gun gecisi yan etki yaratmis olabilir) ----------------
     tek_ders_yasakla_pass()
@@ -1313,15 +1370,22 @@ def dagit(veri, kac_deneme=3, zaman_siniri_sn=320):
     taban_seed = veri.get("seed", random.randint(1, 999999))
     t_baslangic = time.time()
     _skor_hesapla = hesapla_skor  # geriye-uyumluluk icin yerel takma ad
-
-    # ---- ASAMA 1: HIZLI TEMEL SONUC (guvenlik agi - HER ZAMAN calisir) ----
     tum_denemeler = []  # her denemenin ozet istatistigi - Render log erisimi
                           # guvenilmez oldugu icin bunu DOGRUDAN API cevabina
                           # koyuyoruz, tarayici konsolunda gorulebilsin diye.
+
+    # ---- ASAMA 1: GUVENLI TEMEL SONUC (guvenlik agi) ----
+    # 20sn cok kisaydi: otomatik_bos_gun_pass (guvenli - ASLA 2. gun
+    # yaratmaz, sadece 1 gun VERMEYE calisir) cogu ogretmeni konsolide
+    # edecek zamani bulamiyordu, bu da 'guclu' (on-atamali) deneme
+    # reddedildiginde (fazla_bos_gun>0 oldugu icin) geriye COK ZAYIF bir
+    # yedek kalmasina yol aciyordu. Artik bu asamaya da gercek bir butce
+    # veriliyor - boylece HEM asla-2-gun kuralini bozmuyor HEM cogu
+    # ogretmene guvenli sekilde bos gun verebiliyor.
     temel_veri = dict(veri)
     temel_veri["seed"] = taban_seed
     temel_veri["on_bos_gun_ata"] = False
-    temel_veri["_deneme_butcesi_sn"] = 20
+    temel_veri["_deneme_butcesi_sn"] = 90
     en_iyi = _dagit_tek_deneme(temel_veri)
     en_iyi["_on_bos_gun_ata_kullanildi"] = False
     en_iyi["_kaynak"] = "asama1_temel"
@@ -1343,7 +1407,7 @@ def dagit(veri, kac_deneme=3, zaman_siniri_sn=320):
     # denemenin surekli/kesintisiz calisip TAMAMLANMA sansini artirir.
     # En kotu durum: 20(asama1) + 260(guclu) + 20(yedek) = 300sn - Render'in
     # 360sn limitine hala ~60sn guvenli pay birakir.
-    GUCLU_BUTCE = 260   # on_bos_gun_ata=True icin - TEK deneme, kesintisiz calissin diye genis tutuldu
+    GUCLU_BUTCE = 180   # on_bos_gun_ata=True icin - Asama 1'in 90sn'ye cikmasi nedeniyle dengelendi
     HIZLI_BUTCE = 20    # on_bos_gun_ata=False fallback/cesitlilik icin
     GUCLU_DENEME_SAYISI = 1
 

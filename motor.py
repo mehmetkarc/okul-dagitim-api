@@ -1197,6 +1197,97 @@ def _dagit_tek_deneme(veri):
             }}
 
 
+def hesapla_skor(sonuc):
+    """SIRALI (lexicographic) tuple dondurur - agirlikli toplam DEGIL.
+    Python tuple karsilastirmasi soldan saga once ilk farkli elemana
+    bakar - bu yuzden erken sıradaki bir metrik HER ZAMAN sonraki
+    metriklerden MUTLAK oncelikli olur, sayisal agirlik dengesizligi
+    olusamaz.
+
+    KULLANICI KARARI: idareci disindaki HERKESE bos gun VERILMESI
+    (kapsama), 'fazla bos gun' (2+ gunlu) sayisindan DAHA ONCELIKLI.
+    Kullanici bu ihlalleri (varsa) kendisi manuel kontrol edip
+    duzeltecegini belirtti - sistem once kapsamayi maksimize etmeye
+    calisir, fazla-bos-gun hala takip edilir/azaltilmaya calisilir
+    (motor.py'nin ic gecisleri - konsolide_pass, brans_takas_pass -
+    HALA bunu 0'a indirmeye calisiyor) ama SEÇİMİ artik bloke etmiyor.
+
+    Bu fonksiyon MODUL SEVIYESINDE (dagit() disinda) tanimlanmistir ki
+    hem dagit() hem arka_plan_arama() hem de app.py/dagit_yerel.py AYNI
+    fonksiyonu kullanabilsin - tutarli siralama garanti edilir."""
+    ist = sonuc.get("istatistik", {})
+    return (
+        len(sonuc["eksikler"]),                        # 1) asla eksik ders
+        ist.get("min_ihlal_sayisi", 0),                 # 2) asla tek ders
+        ist.get("sifir_bos_gun_sayisi", 0),              # 3) herkese bos gun (kullanici karari: bunu on plana al)
+        ist.get("fazla_bos_gun_sayisi", 0),              # 4) fazla bos gun - hala azaltilir ama artik ikincil
+        ist.get("pencere_fazla_sayisi", 0),              # 5) pencere <=2 hedefi
+        ist.get("pencere_toplam", 0),                    # 6) ince ayar
+    )
+
+
+def arka_plan_arama(veri, sure_sn, ilerleme_fn=None, durdur_fn=None, tur_butcesi_sn=90):
+    """Web istegi suresiyle SINIRLI OLMADAN (app.py bunu bir arka plan
+    thread'inde cagirir), COK SAYIDA farkli rastgele deneme yaparak
+    (ASC/FET tarzi) en iyi sonucu arar. hesapla_skor() ile AYNI oncelik
+    sirasini kullanir - bu yuzden pencereyi azaltirken ASLA bos-gun
+    kapsamasini/asla-tek-ders kuralini bozan bir sonuc secmez.
+
+    veri: normal /dagit payload'i (siniflar, dersler, atamalar, kisitlar,
+          gunler, kilitli).
+    sure_sn: toplam calisma suresi (saniye). app.py bunu kullanicinin
+          sectigi dakika/saat degerinden hesaplar.
+    ilerleme_fn(tur_no, en_iyi_sonuc, en_iyi_skor, gecen_sn): her YENİ EN
+          İYİ sonuc bulundugunda cagirilir - app.py bunu is durumuna
+          yazarak /durum endpoint'inin canli ilerleme gostermesini saglar.
+    durdur_fn(): her tur basinda kontrol edilir - True donerse arama
+          NAZIKCE durur (o ana kadarki en iyi sonuc kaybolmaz). app.py
+          kullanici 'Durdur' dedigin de bunu True yapar.
+    tur_butcesi_sn: her TEK denemeye ayrilan maksimum sure.
+
+    Dondurur: en_iyi_sonuc (motor.py'nin normal /dagit cikti formatinda,
+    ustune '_tur_no' ve '_gecen_sn' eklenmis) - hic tur tamamlanamadiysa
+    None doner."""
+    taban_seed = veri.get("seed", random.randint(1, 999_999_999))
+    t0 = time.time()
+    en_iyi_sonuc = None
+    en_iyi_skor = None
+    tur_no = 0
+    mukemmel = (0, 0, 0, 0, 0, 0)
+
+    while time.time() - t0 < sure_sn:
+        if durdur_fn is not None and durdur_fn():
+            break
+        tur_no += 1
+        kalan = sure_sn - (time.time() - t0)
+        if kalan < 10:
+            break
+        deneme_veri = dict(veri)
+        deneme_veri["seed"] = (taban_seed + tur_no * 7919) % 999_999_999
+        deneme_veri["on_bos_gun_ata"] = (tur_no % 5 != 0)
+        deneme_veri["_deneme_butcesi_sn"] = min(tur_butcesi_sn, max(kalan - 5, 10))
+
+        sonuc = _dagit_tek_deneme(deneme_veri)
+        skor = hesapla_skor(sonuc)
+        gecen = time.time() - t0
+
+        if en_iyi_skor is None or skor < en_iyi_skor:
+            en_iyi_skor = skor
+            en_iyi_sonuc = sonuc
+            en_iyi_sonuc["_tur_no"] = tur_no
+            en_iyi_sonuc["_gecen_sn"] = round(gecen, 1)
+            if ilerleme_fn is not None:
+                try:
+                    ilerleme_fn(tur_no, en_iyi_sonuc, en_iyi_skor, gecen)
+                except Exception:
+                    pass  # ilerleme bildirimi basarisiz olsa bile arama devam etmeli
+
+        if en_iyi_skor == mukemmel:
+            break
+
+    return en_iyi_sonuc
+
+
 def dagit(veri, kac_deneme=3, zaman_siniri_sn=320):
     """Coklu-deneme sarmalayicisi - IKI ASAMALI:
 
@@ -1214,44 +1305,14 @@ def dagit(veri, kac_deneme=3, zaman_siniri_sn=320):
     fazla sure vermek' tek basina cozum degil. Iki FARKLI seed denemek,
     kotu bir rastgele atamanin butun sonucu batirma riskini azaltir.
 
-    Oncelik sirasi (skor ne kadar dusukse o kadar iyi):
-      1) eksik ders sayisi (EN AGIR - sinif ders eksik kalmasin)
-      2) fazla bos gun (2+ gunlu, idareci olmayan) - asla 2 gun bos degil
-      3) min gunluk saat ihlali (asla tek ders - idareci dahil HERKES icin)
-      4) hic bos gunu OLMAYAN (idareci olmayan) ogretmen sayisi
-      5) >2 pencereli (idareci olmayan) ogretmen sayisi
-      6) toplam pencere saati (ince ayar)
+    Oncelik sirasi: bkz. hesapla_skor().
 
     app.py TARAFINDA HICBIR DEGISIKLIK GEREKMEZ - 'from motor import dagit'
     aynen calismaya devam eder.
     """
     taban_seed = veri.get("seed", random.randint(1, 999999))
     t_baslangic = time.time()
-
-    def _skor_hesapla(sonuc):
-        """SIRALI (lexicographic) tuple dondurur - agirlikli toplam DEGIL.
-        Python tuple karsilastirmasi soldan saga once ilk farkli elemana
-        bakar - bu yuzden erken sıradaki bir metrik HER ZAMAN sonraki
-        metriklerden MUTLAK oncelikli olur, sayisal agirlik dengesizligi
-        olusamaz.
-
-        KULLANICI KARARI (degistirildi): idareci disindaki HERKESE bos gun
-        VERILMESI (kapsama), 'fazla bos gun' (2+ gunlu) sayisindan DAHA
-        ONCELIKLI. Kullanici bu ihlalleri (varsa) kendisi manuel kontrol
-        edip duzeltecegini belirtti - sistem ARTIK once kapsamayi
-        maksimize etmeye calisir, fazla-bos-gun hala takip edilir/
-        azaltilmaya calisilir (motor.py'nin ic gecisleri - konsolide_pass,
-        brans_takas_pass - HALA bunu 0'a indirmeye calisiyor) ama SEÇİMİ
-        artik bloke etmiyor."""
-        ist = sonuc.get("istatistik", {})
-        return (
-            len(sonuc["eksikler"]),                        # 1) asla eksik ders
-            ist.get("min_ihlal_sayisi", 0),                 # 2) asla tek ders
-            ist.get("sifir_bos_gun_sayisi", 0),              # 3) herkese bos gun (kullanici karari: bunu on plana al)
-            ist.get("fazla_bos_gun_sayisi", 0),              # 4) fazla bos gun - hala azaltilir ama artik ikincil
-            ist.get("pencere_fazla_sayisi", 0),              # 5) pencere <=2 hedefi
-            ist.get("pencere_toplam", 0),                    # 6) ince ayar
-        )
+    _skor_hesapla = hesapla_skor  # geriye-uyumluluk icin yerel takma ad
 
     # ---- ASAMA 1: HIZLI TEMEL SONUC (guvenlik agi - HER ZAMAN calisir) ----
     tum_denemeler = []  # her denemenin ozet istatistigi - Render log erisimi

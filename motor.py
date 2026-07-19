@@ -1318,7 +1318,7 @@ def _dagit_tek_deneme(veri):
         and sum(1 for g in gunler if day_load[tc][g] == 0) >= 2
     )
     sifir_bos_gun_sayisi = sum(
-        1 for tc in tum_tc if not idareci_mi[tc] and tc_kisit[tc]["bosGun"] is None
+        1 for tc in tum_tc if not idareci_mi[tc]
         and sum(1 for g in gunler if day_load[tc][g] == 0) == 0
     )
 

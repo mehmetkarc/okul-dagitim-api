@@ -1321,7 +1321,13 @@ def arka_plan_arama(veri, sure_sn, ilerleme_fn=None, durdur_fn=None, tur_butcesi
             break
         deneme_veri = dict(veri)
         deneme_veri["seed"] = (taban_seed + tur_no * 7919) % 999_999_999
-        deneme_veri["on_bos_gun_ata"] = (tur_no % 5 != 0)
+        # ONEMLI KESIF: otomatik_bos_gun_pass/otomatik_bos_gun_brans_takas_pass'a
+        # eklenen 'kilitleme' duzeltmesinden sonra GUVENLI mod (on_bos_gun_ata=
+        # False) artik on-atamali (True) moddan DAHA GUVENILIR sonuc veriyor -
+        # hem fazla-bos-gun=0'i hem yuksek bos-gun kapsamasini AYNI ANDA
+        # basariyor (risk yok, cunku bosGun kilitleniyor). Bu yuzden artik
+        # COGUNLUKLA False denenir, True sadece cesitlilik icin araya serpistirilir.
+        deneme_veri["on_bos_gun_ata"] = (tur_no % 4 == 0)
         deneme_veri["_deneme_butcesi_sn"] = min(tur_butcesi_sn, max(kalan - 5, 10))
 
         sonuc = _dagit_tek_deneme(deneme_veri)
@@ -1407,20 +1413,28 @@ def dagit(veri, kac_deneme=3, zaman_siniri_sn=320):
     # denemenin surekli/kesintisiz calisip TAMAMLANMA sansini artirir.
     # En kotu durum: 20(asama1) + 260(guclu) + 20(yedek) = 300sn - Render'in
     # 360sn limitine hala ~60sn guvenli pay birakir.
-    GUCLU_BUTCE = 180   # on_bos_gun_ata=True icin - Asama 1'in 90sn'ye cikmasi nedeniyle dengelendi
-    HIZLI_BUTCE = 20    # on_bos_gun_ata=False fallback/cesitlilik icin
-    GUCLU_DENEME_SAYISI = 1
+    # ONEMLI KESIF: otomatik_bos_gun_pass/otomatik_bos_gun_brans_takas_pass'a
+    # eklenen 'kilitleme' duzeltmesinden sonra GUVENLI mod (on_bos_gun_ata=
+    # False) artik on-atamali (True) moddan DAHA GUVENILIR sonuc veriyor -
+    # fazla-bos-gun=0 VE yuksek bos-gun kapsamasini AYNI ANDA basariyor.
+    # Bu yuzden Asama 2'de ONCE farkli bir seed'le GUVENLI modu tekrar
+    # dener (Asama 1'den daha iyi bir kombinasyon/pencere bulma sansi
+    # icin), SONRA cesitlilik icin bir kez de riskli-ama-bazen-daha-iyi
+    # on-atamali modu dener.
+    GUVENLI_BUTCE = 100   # on_bos_gun_ata=False - kanitlanmis en guvenilir yontem
+    GUCLU_BUTCE = 100     # on_bos_gun_ata=True - cesitlilik/ikincil deneme
 
     for i in range(kac_deneme - 1):
         kalan = zaman_siniri_sn - (time.time() - t_baslangic)
-        guclu_dene = (i < GUCLU_DENEME_SAYISI) and kalan >= GUCLU_BUTCE
+        guclu_dene = (i == 1) and kalan >= GUCLU_BUTCE  # sadece 2. denemede True dene
         if kalan <= 5:
             print("Zaman siniri asildi (asama 2 baslamadan), en iyi sonucla devam ediliyor", flush=True)
             break
         deneme_veri = dict(veri)
         deneme_veri["seed"] = taban_seed + (i + 1) * 7919
         deneme_veri["on_bos_gun_ata"] = guclu_dene
-        deneme_veri["_deneme_butcesi_sn"] = GUCLU_BUTCE if guclu_dene else min(HIZLI_BUTCE, max(kalan - 2, 5))
+        deneme_veri["_deneme_butcesi_sn"] = (GUCLU_BUTCE if guclu_dene else GUVENLI_BUTCE)
+        deneme_veri["_deneme_butcesi_sn"] = min(deneme_veri["_deneme_butcesi_sn"], max(kalan - 5, 10))
         sonuc = _dagit_tek_deneme(deneme_veri)
         sonuc["_on_bos_gun_ata_kullanildi"] = guclu_dene
         sonuc["_kaynak"] = f"asama2_deneme{i+1}"

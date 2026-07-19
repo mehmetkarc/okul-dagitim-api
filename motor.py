@@ -353,8 +353,11 @@ def _dagit_tek_deneme(veri):
             if not g or not bilgi:
                 continue
             gun_b, saat_b, tc_b = bilgi[0], bilgi[1], bilgi[2]
+            ogrtler_b = bilgi[3] if len(bilgi) > 3 else None
             if tc_b and tc_b != g["tc"]:
                 g["tc"] = tc_b  # brans-takasli bir onceki cozumden geliyor olabilir
+                if ogrtler_b is not None:
+                    g["ogrtler"] = ogrtler_b  # goruntuleme listesini de senkronize et
             g["placed"] = (gun_b, saat_b)
             for b in range(g["boy"]):
                 class_occ.setdefault(g["sid"], {})[(gun_b, saat_b + b)] = g["id"]
@@ -1238,6 +1241,32 @@ def _dagit_tek_deneme(veri):
     fazla_bos_gun_brans_takas_pass()
     tek_ders_yasakla_pass()
 
+    # ---------------- 9d. BUTUNLUK DOGRULAMASI (cakisma kontrolu) ----------------
+    # baslangic_yerlesim (artimli devam) mekanizmasi HENUZ TAM guvenilir
+    # kanitlanmadigi icin, cikti uretmeden ONCE gercek bir cakisma olup
+    # olmadigini TARAR. Cakisma varsa bu sonuc KULLANILAMAZ olarak
+    # isaretlenir - cagiran taraf (arka_plan_arama) bu turu güvenle atlar,
+    # boylece HICBIR ZAMAN cakismali bir sonuc kullaniciya ulasamaz.
+    _butunluk_sorunu = False
+    _sinif_gorulen = set()
+    _ogrt_gorulen = set()
+    for g in gorevler:
+        if not g["placed"]:
+            continue
+        gun_v, saat_v = g["placed"]
+        for b in range(g["boy"]):
+            sinif_anahtar = (g["sid"], gun_v, saat_v + b)
+            if sinif_anahtar in _sinif_gorulen:
+                _butunluk_sorunu = True
+            _sinif_gorulen.add(sinif_anahtar)
+            for otc in tum_ogrt(g):
+                ogrt_anahtar = (otc, gun_v, saat_v + b)
+                if ogrt_anahtar in _ogrt_gorulen:
+                    _butunluk_sorunu = True
+                _ogrt_gorulen.add(ogrt_anahtar)
+    if _butunluk_sorunu:
+        print("UYARI: butunluk dogrulamasi CAKISMA tespit etti - bu sonuc ATILIYOR", flush=True)
+
     # ---------------- 10. Cikti ----------------
     slots = {sid: {} for sid in siniflar}
     for g in gorevler:
@@ -1311,14 +1340,18 @@ def _dagit_tek_deneme(veri):
           f"pencere_fazla={pencere_fazla_sayisi} pencere_max={pencere_max} pencere_toplam={pencere_toplam} "
           f"fazla_bosgun={fazla_bos_gun_sayisi} sifir_bosgun={sifir_bos_gun_sayisi}", flush=True)
 
-    # Ham yerlesim ({gid: [gun,saat,tc]}) - bir sonraki cagriya 'baslangic_yerlesim'
-    # olarak verilip ARTIMLI (sifirdan degil) devam edilebilmesi icin.
-    _yerlesim_ham = {g["id"]: [g["placed"][0], g["placed"][1], g["tc"]]
+    # Ham yerlesim ({gid: [gun,saat,tc,ogrtler]}) - bir sonraki cagriya
+    # 'baslangic_yerlesim' olarak verilip ARTIMLI (sifirdan degil) devam
+    # edilebilmesi icin. ogrtler (goruntuleme listesi) de dahil edilir -
+    # aksi halde brans-takasli bir gorevin goruntuleme adi eski ogretmeni
+    # gosterirken gercek tc'si yeni ogretmeni gosterir (tutarsizlik).
+    _yerlesim_ham = {g["id"]: [g["placed"][0], g["placed"][1], g["tc"], g["ogrtler"]]
                       for g in gorevler if g["placed"]}
 
     return {"basari": basarili, "slots": slots, "eksikler": eksikler,
             "sure_sn": sure, "durum": durum, "seed": seed,
             "_yerlesim_ham": _yerlesim_ham,
+            "_butunluk_sorunu": _butunluk_sorunu,
             "istatistik": {
                 "min_ihlal_sayisi": min_ihlal_sayisi,
                 "pencere_fazla_sayisi": pencere_fazla_sayisi,
@@ -1396,10 +1429,7 @@ def arka_plan_arama(veri, sure_sn, ilerleme_fn=None, durdur_fn=None, tur_butcesi
     en_iyi_skor = None
     tur_no = 0
     mukemmel = (0, 0, 0, 0, 0, 0, 0)
-    FAZ1_TUR_SAYISI = 999999  # GUVENLIK: Faz 2 (artimli cilalama) CAKISMA riski
-    # tespit edildigi icin GECICI OLARAK DEVRE DISI - hata giderilene kadar
-    # SADECE Faz 1 (her tur tam yeniden cozme) kullanilir. Kod ileride
-    # duzeltilip yeniden etkinlestirilebilir (bkz. asagidaki 'else' blogu).
+    FAZ1_TUR_SAYISI = 3  # kesif icin kac tam cozum denensin, sonrasi cilalama
 
     while time.time() - t0 < sure_sn:
         if durdur_fn is not None and durdur_fn():
@@ -1434,6 +1464,16 @@ def arka_plan_arama(veri, sure_sn, ilerleme_fn=None, durdur_fn=None, tur_butcesi
                 deneme_veri["_deneme_butcesi_sn"] = min(tur_butcesi_sn, max(kalan - 5, 10))
 
         sonuc = _dagit_tek_deneme(deneme_veri)
+
+        # GUVENLIK AGI: butunluk dogrulamasi cakisma bulduysa bu tur TAMAMEN
+        # ATILIR - en_iyi_sonuc HIC degismez, bir sonraki tur (baslangic_
+        # yerlesim hala eski/GUVENLI en_iyi_sonuc'tan geldigi icin) normal
+        # sekilde devam eder. Boylece Faz 2'deki olasi bir hata ASLA
+        # kullaniciya cakismali bir sonuc olarak ulasamaz.
+        if sonuc.get("_butunluk_sorunu"):
+            print(f"[GUVENLIK] tur {tur_no}: cakisma tespit edildi, bu tur ATILDI", flush=True)
+            continue
+
         skor = hesapla_skor(sonuc)
         gecen = time.time() - t0
 

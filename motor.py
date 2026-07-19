@@ -845,20 +845,34 @@ def _dagit_tek_deneme(veri):
         brans = tc_kisit[tc]["brans"]
         if not brans:
             return False
+        ming = tc_kisit[tc]["minG"] or 2
+        genel_basari = False
         for fazla_gun in _ogretmenin_fazla_gunleri(tc):
-            adaylar_g2 = [g2 for g2 in gorevler
-                          if g2["placed"] and g2["placed"][0] == fazla_gun
-                          and g2["tc"] and g2["tc"] != tc
-                          and tc_kisit.get(g2["tc"], {}).get("brans") == brans]
-            for g2 in adaylar_g2:
-                boy2 = g2["boy"]
-                adaylar_g1 = [g1 for g1 in gorevler
-                              if g1["placed"] and tc in tum_ogrt(g1) and g1["boy"] == boy2
-                              and g1["placed"][0] != fazla_gun]
-                for g1 in adaylar_g1:
-                    if _takasi_uygula(g1["id"], g2["id"]):
-                        return True
-        return False
+            # TEK takasla yetinme: gun GERCEKTEN en az ming saate ulasana
+            # kadar (ya da daha fazla aday kalmayana kadar) tekrar tekrar
+            # takas dene - aksi halde yarim dolu (0<yuk<ming) yeni bir
+            # tek-ders ihlali birakabilir.
+            while day_load[tc][fazla_gun] < ming:
+                adaylar_g2 = [g2 for g2 in gorevler
+                              if g2["placed"] and g2["placed"][0] == fazla_gun
+                              and g2["tc"] and g2["tc"] != tc
+                              and tc_kisit.get(g2["tc"], {}).get("brans") == brans]
+                bu_turda_basarili = False
+                for g2 in adaylar_g2:
+                    boy2 = g2["boy"]
+                    adaylar_g1 = [g1 for g1 in gorevler
+                                  if g1["placed"] and tc in tum_ogrt(g1) and g1["boy"] == boy2
+                                  and g1["placed"][0] != fazla_gun]
+                    for g1 in adaylar_g1:
+                        if _takasi_uygula(g1["id"], g2["id"]):
+                            genel_basari = True
+                            bu_turda_basarili = True
+                            break
+                    if bu_turda_basarili:
+                        break
+                if not bu_turda_basarili:
+                    break  # bu gun icin daha fazla aday yok, sonraki fazla_gun'a gec
+        return genel_basari
 
     def fazla_bos_gun_brans_takas_pass():
         for _tur in range(10):

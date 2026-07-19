@@ -1370,19 +1370,28 @@ def hesapla_skor(sonuc):
     metriklerden MUTLAK oncelikli olur, sayisal agirlik dengesizligi
     olusamaz.
 
-    KULLANICI KARARI (SON - KESIN): 'asla 2 gun bos verilemez' kurali
-    MEB yonetmeligine dayanan MUTLAK bir kisittir - bos-gun kapsamasindan
-    (sifir_bos_gun) bile ONCELIKLIDIR. Ayrica pencere DAGILIMI da adil
-    olmali - bir ogretmen 0 pencereyken baskasi 12 pencereye sahip
-    olmamali; bu yuzden pencere_max (en yuksek tekil pencere degeri)
-    pencere_toplam'dan ONCE gelir - once EN KOTU durumdaki ogretmeni
-    iyilestirmeye calisir, sonra genel toplami.
+    KULLANICI KARARI (SON - KESIN, DUZELTILDI): 'asla 2 gun bos
+    verilemez' kurali MEB yonetmeligine dayanan MUTLAK bir kisittir -
+    bu, min-gunluk-saat (asla tek ders) kuralindan bile ONCELIKLIDIR
+    artik (once yanlislikla min_ihlal fazla_bos_gun'dan once sıralanmisti,
+    bu da 'fazla_bosgun=2 ama min_ihlal=3' olan bir sonucun 'fazla_
+    bosgun=0 ama min_ihlal=4' olan bir sonuca karsi yanlislikla
+    KAZANMASINA yol aciyordu - MEB kuralini ihlal eden bir sonuc
+    secilmis oluyordu). Simdi fazla_bos_gun_sayisi EN BASTA (eksikten
+    hemen sonra) geliyor - hicbir kombinasyonda MEB kuralini ihlal eden
+    bir sonuc, ihlal etmeyen bir sonuca karsi kazanamaz.
+
+    Ayrica pencere DAGILIMI da adil olmali - bir ogretmen 0 pencereyken
+    baskasi 12 pencereye sahip olmamali; bu yuzden pencere_max (en
+    yuksek tekil pencere degeri) pencere_toplam'dan ONCE gelir - once
+    EN KOTU durumdaki ogretmeni iyilestirmeye calisir, sonra genel
+    toplami.
     """
     ist = sonuc.get("istatistik", {})
     return (
         len(sonuc["eksikler"]),                        # 1) asla eksik ders
-        ist.get("min_ihlal_sayisi", 0),                 # 2) asla tek ders
-        ist.get("fazla_bos_gun_sayisi", 0),              # 3) asla 2+ bos gun (MEB) - MUTLAK
+        ist.get("fazla_bos_gun_sayisi", 0),              # 2) asla 2+ bos gun (MEB) - EN MUTLAK KURAL
+        ist.get("min_ihlal_sayisi", 0),                 # 3) asla tek ders
         ist.get("sifir_bos_gun_sayisi", 0),              # 4) herkese bos gun (kapsama)
         ist.get("pencere_fazla_sayisi", 0),              # 5) pencere <=2 hedefine ulasan sayisi
         ist.get("pencere_max", 0),                       # 6) ADALET: en kotu tekil pencere degeri

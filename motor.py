@@ -1507,7 +1507,7 @@ def arka_plan_arama(veri, sure_sn, ilerleme_fn=None, durdur_fn=None, tur_butcesi
     return en_iyi_sonuc
 
 
-def dagit(veri, kac_deneme=3, zaman_siniri_sn=320):
+def dagit(veri, kac_deneme=5, zaman_siniri_sn=320):
     """Coklu-deneme sarmalayicisi - IKI ASAMALI:
 
     ASAMA 1 (HIZLI TEMEL SONUC - guvenlik agi): once en hizli/guvenilir
@@ -1547,7 +1547,7 @@ def dagit(veri, kac_deneme=3, zaman_siniri_sn=320):
     temel_veri = dict(veri)
     temel_veri["seed"] = taban_seed
     temel_veri["on_bos_gun_ata"] = False
-    temel_veri["_deneme_butcesi_sn"] = 90
+    temel_veri["_deneme_butcesi_sn"] = 65
     en_iyi = _dagit_tek_deneme(temel_veri)
     en_iyi["_on_bos_gun_ata_kullanildi"] = False
     en_iyi["_kaynak"] = "asama1_temel"
@@ -1561,28 +1561,20 @@ def dagit(veri, kac_deneme=3, zaman_siniri_sn=320):
           f"eksik={len(en_iyi['eksikler'])} gecen_toplam={round(time.time()-t_baslangic,1)}s", flush=True)
 
     # ---- ASAMA 2: ISTEGE BAGLI IYILESTIRME (kalan zaman varsa) ----
-    # TEK UZUN guclu (on_bos_gun_ata=True) deneme yapilir - iki kisa deneme
-    # yerine. GOZLEM: 130sn'lik butce bazen ANA YERLESTIRMENIN BILE
-    # TAMAMLANMASINA yetmiyor (8-61 eksik gibi ciddi hatalarla sonuclaniyor,
-    # bu bir 'optimizasyon eksikligi' degil, 'yerlestirme yarida kesildi'
-    # demek). Iki kez 130sn denemek yerine BIR kez 260sn denemek, tek
-    # denemenin surekli/kesintisiz calisip TAMAMLANMA sansini artirir.
-    # En kotu durum: 20(asama1) + 260(guclu) + 20(yedek) = 300sn - Render'in
-    # 360sn limitine hala ~60sn guvenli pay birakir.
-    # ONEMLI KESIF: otomatik_bos_gun_pass/otomatik_bos_gun_brans_takas_pass'a
-    # eklenen 'kilitleme' duzeltmesinden sonra GUVENLI mod (on_bos_gun_ata=
-    # False) artik on-atamali (True) moddan DAHA GUVENILIR sonuc veriyor -
-    # fazla-bos-gun=0 VE yuksek bos-gun kapsamasini AYNI ANDA basariyor.
-    # Bu yuzden Asama 2'de ONCE farkli bir seed'le GUVENLI modu tekrar
-    # dener (Asama 1'den daha iyi bir kombinasyon/pencere bulma sansi
-    # icin), SONRA cesitlilik icin bir kez de riskli-ama-bazen-daha-iyi
-    # on-atamali modu dener.
-    GUVENLI_BUTCE = 100   # on_bos_gun_ata=False - kanitlanmis en guvenilir yontem
-    GUCLU_BUTCE = 100     # on_bos_gun_ata=True - cesitlilik/ikincil deneme
+    # KULLANICI KARARI: web akisinda deneme sayisi artirildi. GUVENLI mod
+    # (on_bos_gun_ata=False) kanitlanmis en guvenilir yontem oldugu icin
+    # COGUNLUKLA o denenir (farkli seed'lerle - her biri FARKLI bir rastgele
+    # siralama dener, bu yuzden 0-fazla-bos-gun VE iyi pencereye ulasma
+    # sansi her ek denemeyle artar). Son deneme cesitlilik icin riskli-ama-
+    # bazen-daha-iyi on-atamali (True) modu dener.
+    # En kotu durum: 65(asama1) + 60*4(asama2) = 305sn - Render'in 360sn
+    # limitine hala ~55sn guvenli pay birakir.
+    GUVENLI_BUTCE = 60    # on_bos_gun_ata=False - kanitlanmis en guvenilir yontem
+    GUCLU_BUTCE = 60      # on_bos_gun_ata=True - cesitlilik icin son deneme
 
     for i in range(kac_deneme - 1):
         kalan = zaman_siniri_sn - (time.time() - t_baslangic)
-        guclu_dene = (i == 1) and kalan >= GUCLU_BUTCE  # sadece 2. denemede True dene
+        guclu_dene = (i == kac_deneme - 2) and kalan >= GUCLU_BUTCE  # SADECE son denemede True dene
         if kalan <= 5:
             print("Zaman siniri asildi (asama 2 baslamadan), en iyi sonucla devam ediliyor", flush=True)
             break

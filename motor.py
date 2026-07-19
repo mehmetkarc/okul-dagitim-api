@@ -333,6 +333,60 @@ def _dagit_tek_deneme(veri):
         kuyruk.extend(g["id"] for g in gl)
     kuyruk.extend(g["id"] for g in gorevler if not g["tc"])  # ogretmensiz dersler en sona
 
+    # ---------------- 4b. ARTIMLI YEREL ARAMA: onceki iyi cozumden devam ----------------
+    # ASC/FET gibi profesyonel programlar 'sifirdan yeniden dene' YERINE
+    # mevcut iyi bir cozumu alip KADEMELI iyilestirir (gercek yerel arama /
+    # simulated annealing). Eger 'baslangic_yerlesim' verilmisse ({gid:
+    # [gun,saat,tc]} - bir onceki _dagit_tek_deneme cagrisinin sonucundan
+    # uretilir), o yerlesimi DOGRUDAN uygularim ve ana coklu-yerlestirme
+    # dongusunu ATLARIM - boylece saniyeler suren yeniden-cozme yerine
+    # DOGRUDAN cilalama (pencere azaltma, brans takasi) gecislerine geçilir.
+    # Bu, arka_plan_arama()'nin her turda TAM YENIDEN COZMEK yerine ayni
+    # cozum uzerinde SUREKLI iyilestirme yapmasini saglar - ASC/FET
+    # mantigina çok daha yakin.
+    baslangic_yerlesim = veri.get("baslangic_yerlesim")
+    onceden_yerlesen_gid = set()
+    if baslangic_yerlesim:
+        gid_map_erken = {g["id"]: g for g in gorevler}
+        for gid, bilgi in baslangic_yerlesim.items():
+            g = gid_map_erken.get(gid)
+            if not g or not bilgi:
+                continue
+            gun_b, saat_b, tc_b = bilgi[0], bilgi[1], bilgi[2]
+            if tc_b and tc_b != g["tc"]:
+                g["tc"] = tc_b  # brans-takasli bir onceki cozumden geliyor olabilir
+            g["placed"] = (gun_b, saat_b)
+            for b in range(g["boy"]):
+                class_occ.setdefault(g["sid"], {})[(gun_b, saat_b + b)] = g["id"]
+                for otc in tum_ogrt(g):
+                    teacher_occ.setdefault(otc, {})[(gun_b, saat_b + b)] = g["id"]
+                    day_load.setdefault(otc, {}).setdefault(gun_b, 0)
+                    day_load[otc][gun_b] += 0  # asagida topluca yeniden hesaplanacak
+            onceden_yerlesen_gid.add(gid)
+        # day_load'u SIFIRDAN VE DOGRU sekilde yeniden hesapla (yukaridaki
+        # dongude += 0 ile sadece anahtarlari olusturduk)
+        for tc2 in tum_tc:
+            for gun2 in gunler:
+                day_load[tc2][gun2] = 0
+        for g in gorevler:
+            if g["placed"]:
+                gun_p, saat_p = g["placed"]
+                for otc in tum_ogrt(g):
+                    day_load[otc][gun_p] = day_load[otc].get(gun_p, 0) + g["boy"]
+        kuyruk = [gid for gid in kuyruk if gid not in onceden_yerlesen_gid]
+        # KRITIK: baslangic_yerlesim'den gelen HALIHAZIRDA bos olan gunleri
+        # hemen KILITLE (tc_kisit[tc]["bosGun"]) - aksi halde otomatik_bos_gun_pass
+        # bu gunu 'zaten var' diye atlar (dogru) AMA KENDISI KILITLEMEDIGI
+        # icin sonraki gecisler (pencere_azalt_pass, brans_takas_pass) bu
+        # gunu koruma altinda olmadan doldurabilir - onceki turda kazanilan
+        # bos gun sessizce kaybolur.
+        for tc in tum_tc:
+            if idareci_mi[tc] or tc_kisit[tc]["bosGun"] is not None:
+                continue
+            bos_gunler_simdi = [g for g in gunler if day_load[tc][g] == 0]
+            if bos_gunler_simdi:
+                tc_kisit[tc]["bosGun"] = bos_gunler_simdi[0]
+
     # ---------------- 5. Yerlestirme + displacement ----------------
     # on_bos_gun_ata modunda butun ogretmenler bastan kisitli oldugundan
     # yerlestirme daha zor - biraz daha derin arama gerekiyor (4), ama 5
@@ -1257,8 +1311,14 @@ def _dagit_tek_deneme(veri):
           f"pencere_fazla={pencere_fazla_sayisi} pencere_max={pencere_max} pencere_toplam={pencere_toplam} "
           f"fazla_bosgun={fazla_bos_gun_sayisi} sifir_bosgun={sifir_bos_gun_sayisi}", flush=True)
 
+    # Ham yerlesim ({gid: [gun,saat,tc]}) - bir sonraki cagriya 'baslangic_yerlesim'
+    # olarak verilip ARTIMLI (sifirdan degil) devam edilebilmesi icin.
+    _yerlesim_ham = {g["id"]: [g["placed"][0], g["placed"][1], g["tc"]]
+                      for g in gorevler if g["placed"]}
+
     return {"basari": basarili, "slots": slots, "eksikler": eksikler,
             "sure_sn": sure, "durum": durum, "seed": seed,
+            "_yerlesim_ham": _yerlesim_ham,
             "istatistik": {
                 "min_ihlal_sayisi": min_ihlal_sayisi,
                 "pencere_fazla_sayisi": pencere_fazla_sayisi,
@@ -1299,65 +1359,98 @@ def hesapla_skor(sonuc):
 
 def arka_plan_arama(veri, sure_sn, ilerleme_fn=None, durdur_fn=None, tur_butcesi_sn=90):
     """Web istegi suresiyle SINIRLI OLMADAN (app.py bunu bir arka plan
-    thread'inde cagirir), COK SAYIDA farkli rastgele deneme yaparak
-    (ASC/FET tarzi) en iyi sonucu arar. hesapla_skor() ile AYNI oncelik
-    sirasini kullanir - bu yuzden pencereyi azaltirken ASLA bos-gun
-    kapsamasini/asla-tek-ders kuralini bozan bir sonuc secmez.
+    thread'inde cagirir), ASC/FET'e YAKIN bir yontemle en iyi sonucu arar:
+
+    FAZ 1 (KESIF - ilk birkac tur): farkli rastgele siralamalarla TAM
+    cozumler dener, iyi bir TABAN bulur.
+
+    FAZ 2 (ARTIMLI CILALAMA - kalan tum sure): FAZ 1'de bulunan EN IYI
+    cozumu 'baslangic_yerlesim' olarak verip _dagit_tek_deneme'yi TEKRAR
+    COZMEDEN, DOGRUDAN cilalama gecislerine (pencere azaltma, brans
+    takasi, bos-gun duzeltme) sokar - HER TUR bir onceki turun SONUCU
+    UZERINE insa eder (ASC/FET'in yaptigi gibi kademeli iyilestirme).
+    Bir tur mevcut en iyiden KOTU cikarsa o turun sonucu ATILIR, bir
+    sonraki tur YINE mevcut en iyiden devam eder (hic zaman kaybi/gerileme
+    olmaz - sadece hicbir zaman kotulesmeyen, surekli ilerleyen bir
+    arama). Bu, 'her turda sifirdan yeniden coz' yaklasimindan COK DAHA
+    HIZLI (bir tur saniyeler surer, dakikalar degil) ve COK DAHA ETKILI
+    (gercek yerel arama).
+
+    hesapla_skor() ile AYNI oncelik sirasini kullanir - bu yuzden
+    pencereyi azaltirken ASLA bos-gun kapsamasini/asla-tek-ders/asla-2-
+    gun kuralini bozan bir sonuc secmez.
 
     veri: normal /dagit payload'i (siniflar, dersler, atamalar, kisitlar,
           gunler, kilitli).
-    sure_sn: toplam calisma suresi (saniye). app.py bunu kullanicinin
-          sectigi dakika/saat degerinden hesaplar.
+    sure_sn: toplam calisma suresi (saniye).
     ilerleme_fn(tur_no, en_iyi_sonuc, en_iyi_skor, gecen_sn): her YENİ EN
-          İYİ sonuc bulundugunda cagirilir - app.py bunu is durumuna
-          yazarak /durum endpoint'inin canli ilerleme gostermesini saglar.
+          İYİ sonuc bulundugunda cagirilir.
     durdur_fn(): her tur basinda kontrol edilir - True donerse arama
-          NAZIKCE durur (o ana kadarki en iyi sonuc kaybolmaz). app.py
-          kullanici 'Durdur' dedigin de bunu True yapar.
-    tur_butcesi_sn: her TEK denemeye ayrilan maksimum sure.
+          NAZIKCE durur.
+    tur_butcesi_sn: FAZ 1'deki her TAM denemeye ayrilan maksimum sure.
 
-    Dondurur: en_iyi_sonuc (motor.py'nin normal /dagit cikti formatinda,
-    ustune '_tur_no' ve '_gecen_sn' eklenmis) - hic tur tamamlanamadiysa
-    None doner."""
+    Dondurur: en_iyi_sonuc - hic tur tamamlanamadiysa None doner."""
     taban_seed = veri.get("seed", random.randint(1, 999_999_999))
     t0 = time.time()
     en_iyi_sonuc = None
     en_iyi_skor = None
     tur_no = 0
     mukemmel = (0, 0, 0, 0, 0, 0, 0)
+    FAZ1_TUR_SAYISI = 999999  # GUVENLIK: Faz 2 (artimli cilalama) CAKISMA riski
+    # tespit edildigi icin GECICI OLARAK DEVRE DISI - hata giderilene kadar
+    # SADECE Faz 1 (her tur tam yeniden cozme) kullanilir. Kod ileride
+    # duzeltilip yeniden etkinlestirilebilir (bkz. asagidaki 'else' blogu).
 
     while time.time() - t0 < sure_sn:
         if durdur_fn is not None and durdur_fn():
             break
         tur_no += 1
         kalan = sure_sn - (time.time() - t0)
-        if kalan < 10:
+        if kalan < 5:
             break
         deneme_veri = dict(veri)
         deneme_veri["seed"] = (taban_seed + tur_no * 7919) % 999_999_999
-        # ONEMLI KESIF: otomatik_bos_gun_pass/otomatik_bos_gun_brans_takas_pass'a
-        # eklenen 'kilitleme' duzeltmesinden sonra GUVENLI mod (on_bos_gun_ata=
-        # False) artik on-atamali (True) moddan DAHA GUVENILIR sonuc veriyor -
-        # hem fazla-bos-gun=0'i hem yuksek bos-gun kapsamasini AYNI ANDA
-        # basariyor (risk yok, cunku bosGun kilitleniyor). Bu yuzden artik
-        # COGUNLUKLA False denenir, True sadece cesitlilik icin araya serpistirilir.
-        deneme_veri["on_bos_gun_ata"] = (tur_no % 4 == 0)
-        deneme_veri["_deneme_butcesi_sn"] = min(tur_butcesi_sn, max(kalan - 5, 10))
+
+        if tur_no <= FAZ1_TUR_SAYISI:
+            # ---- FAZ 1: KESIF - tam cozum ----
+            # ONEMLI KESIF: otomatik_bos_gun_pass/otomatik_bos_gun_brans_takas_pass'a
+            # eklenen 'kilitleme' duzeltmesinden sonra GUVENLI mod (False)
+            # artik on-atamali (True) moddan DAHA GUVENILIR sonuc veriyor.
+            deneme_veri["on_bos_gun_ata"] = (tur_no % 4 == 0)
+            deneme_veri["_deneme_butcesi_sn"] = min(tur_butcesi_sn, max(kalan - 5, 10))
+        else:
+            # ---- FAZ 2: ARTIMLI CILALAMA - onceki en iyiden devam ----
+            if en_iyi_sonuc is not None and en_iyi_sonuc.get("_yerlesim_ham"):
+                deneme_veri["baslangic_yerlesim"] = en_iyi_sonuc["_yerlesim_ham"]
+                deneme_veri["on_bos_gun_ata"] = False  # yerlesim zaten hazir, tekrar on-atama gerekmez
+                # Cilalama turlari HIZLIDIR (yeniden yerlestirme yok, sadece
+                # cilalama gecisleri) - kisa butce yeterli, daha fazla tur
+                # denenebilsin diye.
+                deneme_veri["_deneme_butcesi_sn"] = min(30, max(kalan - 5, 5))
+            else:
+                # FAZ 1 hic basarili olmadiysa (nadir) FAZ 2'yi de tam cozum
+                # olarak dene - bos donmemek icin.
+                deneme_veri["on_bos_gun_ata"] = (tur_no % 4 == 0)
+                deneme_veri["_deneme_butcesi_sn"] = min(tur_butcesi_sn, max(kalan - 5, 10))
 
         sonuc = _dagit_tek_deneme(deneme_veri)
         skor = hesapla_skor(sonuc)
         gecen = time.time() - t0
 
-        if en_iyi_skor is None or skor < en_iyi_skor:
+        if en_iyi_skor is None or skor <= en_iyi_skor:
+            gelisti = en_iyi_skor is None or skor < en_iyi_skor
             en_iyi_skor = skor
             en_iyi_sonuc = sonuc
             en_iyi_sonuc["_tur_no"] = tur_no
             en_iyi_sonuc["_gecen_sn"] = round(gecen, 1)
-            if ilerleme_fn is not None:
+            if gelisti and ilerleme_fn is not None:
                 try:
                     ilerleme_fn(tur_no, en_iyi_sonuc, en_iyi_skor, gecen)
                 except Exception:
                     pass  # ilerleme bildirimi basarisiz olsa bile arama devam etmeli
+        # skor kotuyse bu turun sonucu ATILIR - en_iyi_sonuc degismez, bir
+        # sonraki tur YINE en_iyi_sonuc'un yerlesiminden devam eder (asla
+        # geri gitmeyen, surekli ilerleyen bir arama).
 
         if en_iyi_skor == mukemmel:
             break

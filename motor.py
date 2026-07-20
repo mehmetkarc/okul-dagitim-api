@@ -1507,7 +1507,7 @@ def arka_plan_arama(veri, sure_sn, ilerleme_fn=None, durdur_fn=None, tur_butcesi
     return en_iyi_sonuc
 
 
-def dagit(veri, kac_deneme=5, zaman_siniri_sn=320):
+def dagit(veri, kac_deneme=4, zaman_siniri_sn=320):
     """Coklu-deneme sarmalayicisi - IKI ASAMALI:
 
     ASAMA 1 (HIZLI TEMEL SONUC - guvenlik agi): once en hizli/guvenilir
@@ -1561,27 +1561,27 @@ def dagit(veri, kac_deneme=5, zaman_siniri_sn=320):
           f"eksik={len(en_iyi['eksikler'])} gecen_toplam={round(time.time()-t_baslangic,1)}s", flush=True)
 
     # ---- ASAMA 2: ISTEGE BAGLI IYILESTIRME (kalan zaman varsa) ----
-    # KULLANICI KARARI: web akisinda deneme sayisi artirildi. GUVENLI mod
-    # (on_bos_gun_ata=False) kanitlanmis en guvenilir yontem oldugu icin
-    # COGUNLUKLA o denenir (farkli seed'lerle - her biri FARKLI bir rastgele
-    # siralama dener, bu yuzden 0-fazla-bos-gun VE iyi pencereye ulasma
-    # sansi her ek denemeyle artar). Son deneme cesitlilik icin riskli-ama-
-    # bazen-daha-iyi on-atamali (True) modu dener.
-    # En kotu durum: 65(asama1) + 60*4(asama2) = 305sn - Render'in 360sn
-    # limitine hala ~55sn guvenli pay birakir.
-    GUVENLI_BUTCE = 60    # on_bos_gun_ata=False - kanitlanmis en guvenilir yontem
-    GUCLU_BUTCE = 60      # on_bos_gun_ata=True - cesitlilik icin son deneme
+    # ONEMLI DERS (gercek Render testinden): 60sn butce GUVENLI mod icin
+    # bile YETERSIZ kaliyor (fazla_bos_gun'u tam 0'a indiremeden bitiyor).
+    # DAHA FAZLA ama KISA denemeler yerine, DAHA AZ ama YETERLI SURELI
+    # (80-90sn) denemeler daha guvenilir sonuc veriyor. Ayrica riskli
+    # (on_bos_gun_ata=True) mod WEB AKISINDAN TAMAMEN CIKARILDI - gercek
+    # testte 60sn butceyle bazen KATASTROFIK basarisiz oluyor (111 eksik
+    # gibi) - bu risk, olasi pencere kazanimina degmiyor. Sadece kanitlanmis
+    # GUVENLI mod (on_bos_gun_ata=False), FARKLI seed'lerle, YETERLI surede
+    # tekrar tekrar denenir.
+    GUVENLI_BUTCE = 85    # on_bos_gun_ata=False - kanitlanmis en guvenilir yontem, yeterli sure
 
     for i in range(kac_deneme - 1):
         kalan = zaman_siniri_sn - (time.time() - t_baslangic)
-        guclu_dene = (i == kac_deneme - 2) and kalan >= GUCLU_BUTCE  # SADECE son denemede True dene
+        guclu_dene = False  # riskli mod web akisinda ARTIK KULLANILMIYOR
         if kalan <= 5:
             print("Zaman siniri asildi (asama 2 baslamadan), en iyi sonucla devam ediliyor", flush=True)
             break
         deneme_veri = dict(veri)
         deneme_veri["seed"] = taban_seed + (i + 1) * 7919
         deneme_veri["on_bos_gun_ata"] = guclu_dene
-        deneme_veri["_deneme_butcesi_sn"] = (GUCLU_BUTCE if guclu_dene else GUVENLI_BUTCE)
+        deneme_veri["_deneme_butcesi_sn"] = GUVENLI_BUTCE
         deneme_veri["_deneme_butcesi_sn"] = min(deneme_veri["_deneme_butcesi_sn"], max(kalan - 5, 10))
         sonuc = _dagit_tek_deneme(deneme_veri)
         sonuc["_on_bos_gun_ata_kullanildi"] = guclu_dene

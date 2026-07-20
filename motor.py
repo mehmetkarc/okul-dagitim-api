@@ -1523,7 +1523,7 @@ def arka_plan_arama(veri, sure_sn, ilerleme_fn=None, durdur_fn=None, tur_butcesi
     return en_iyi_sonuc
 
 
-def dagit(veri, kac_deneme=4, zaman_siniri_sn=320):
+def dagit(veri, kac_deneme=3, zaman_siniri_sn=230):
     """Coklu-deneme sarmalayicisi - IKI ASAMALI:
 
     ASAMA 1 (HIZLI TEMEL SONUC - guvenlik agi): once en hizli/guvenilir
@@ -1563,7 +1563,7 @@ def dagit(veri, kac_deneme=4, zaman_siniri_sn=320):
     temel_veri = dict(veri)
     temel_veri["seed"] = taban_seed
     temel_veri["on_bos_gun_ata"] = False
-    temel_veri["_deneme_butcesi_sn"] = 65
+    temel_veri["_deneme_butcesi_sn"] = 45
     en_iyi = _dagit_tek_deneme(temel_veri)
     en_iyi["_on_bos_gun_ata_kullanildi"] = False
     en_iyi["_kaynak"] = "asama1_temel"
@@ -1586,7 +1586,7 @@ def dagit(veri, kac_deneme=4, zaman_siniri_sn=320):
     # gibi) - bu risk, olasi pencere kazanimina degmiyor. Sadece kanitlanmis
     # GUVENLI mod (on_bos_gun_ata=False), FARKLI seed'lerle, YETERLI surede
     # tekrar tekrar denenir.
-    GUVENLI_BUTCE = 85    # on_bos_gun_ata=False - kanitlanmis en guvenilir yontem, yeterli sure
+    GUVENLI_BUTCE = 75    # on_bos_gun_ata=False - kanitlanmis en guvenilir yontem, guvenli sure
 
     for i in range(kac_deneme - 1):
         kalan = zaman_siniri_sn - (time.time() - t_baslangic)

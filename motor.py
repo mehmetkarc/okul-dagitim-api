@@ -1393,8 +1393,11 @@ def hesapla_skor(sonuc):
         ist.get("fazla_bos_gun_sayisi", 0),              # 2) asla 2+ bos gun (MEB) - EN MUTLAK KURAL
         ist.get("min_ihlal_sayisi", 0),                 # 3) asla tek ders
         ist.get("sifir_bos_gun_sayisi", 0),              # 4) herkese bos gun (kapsama)
-        ist.get("pencere_fazla_sayisi", 0),              # 5) pencere <=2 hedefine ulasan sayisi
-        ist.get("pencere_max", 0),                       # 6) ADALET: en kotu tekil pencere degeri
+        ist.get("pencere_max", 0),                       # 5) ADALET (ONCELIKLI): '1 ogretmende 10
+                                                          #    pencere' hicbir zaman '10 ogretmende
+                                                          #    2'ser pencere'den iyi sayilmaz - kullanici
+                                                          #    kararidir (pedagojik: yuk yayilmali)
+        ist.get("pencere_fazla_sayisi", 0),              # 6) pencere <=2 hedefine ulasan sayisi
         ist.get("pencere_toplam", 0),                    # 7) genel toplam (ince ayar)
     )
 

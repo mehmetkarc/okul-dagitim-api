@@ -1438,7 +1438,14 @@ def arka_plan_arama(veri, sure_sn, ilerleme_fn=None, durdur_fn=None, tur_butcesi
     en_iyi_skor = None
     tur_no = 0
     mukemmel = (0, 0, 0, 0, 0, 0, 0)
-    FAZ1_TUR_SAYISI = 3  # kesif icin kac tam cozum denensin, sonrasi cilalama
+    FAZ1_TUR_SAYISI = 5   # kesif icin kac tam cozum denensin, sonrasi cilalama
+    # 6-24 saatlik COK UZUN calismalar icin: cilalama bir SUREDIR
+    # (TAKILMA_ESIGI tur boyunca) hic iyilesme saglamiyorsa, mevcut en
+    # iyiden devam etmek yerine TAZE bir tam cozum (yeni rastgele siralama)
+    # dener - bu, aramanin bir 'yerel optimum'a saplanip KALICI OLARAK
+    # takilip kalmasini onler (ASC/FET'in de yaptigi 'restart' stratejisi).
+    TAKILMA_ESIGI = 15
+    son_iyilesme_turu = 0
 
     while time.time() - t0 < sure_sn:
         if durdur_fn is not None and durdur_fn():
@@ -1450,11 +1457,17 @@ def arka_plan_arama(veri, sure_sn, ilerleme_fn=None, durdur_fn=None, tur_butcesi
         deneme_veri = dict(veri)
         deneme_veri["seed"] = (taban_seed + tur_no * 7919) % 999_999_999
 
-        if tur_no <= FAZ1_TUR_SAYISI:
-            # ---- FAZ 1: KESIF - tam cozum ----
+        takildi_mi = (tur_no - son_iyilesme_turu) >= TAKILMA_ESIGI
+
+        if tur_no <= FAZ1_TUR_SAYISI or takildi_mi:
+            # ---- FAZ 1: KESIF (veya TAKILMA sonrasi TAZE BASLANGIC) ----
             # ONEMLI KESIF: otomatik_bos_gun_pass/otomatik_bos_gun_brans_takas_pass'a
             # eklenen 'kilitleme' duzeltmesinden sonra GUVENLI mod (False)
             # artik on-atamali (True) moddan DAHA GUVENILIR sonuc veriyor.
+            if takildi_mi and tur_no > FAZ1_TUR_SAYISI:
+                print(f"[TAKILMA] {TAKILMA_ESIGI} turdur iyilesme yok - taze tam cozum deneniyor "
+                      f"(tur {tur_no})", flush=True)
+                son_iyilesme_turu = tur_no  # tekrar tekrar taze baslangic denemesin, sayaci sifirla
             deneme_veri["on_bos_gun_ata"] = (tur_no % 4 == 0)
             deneme_veri["_deneme_butcesi_sn"] = min(tur_butcesi_sn, max(kalan - 5, 10))
         else:
@@ -1462,10 +1475,11 @@ def arka_plan_arama(veri, sure_sn, ilerleme_fn=None, durdur_fn=None, tur_butcesi
             if en_iyi_sonuc is not None and en_iyi_sonuc.get("_yerlesim_ham"):
                 deneme_veri["baslangic_yerlesim"] = en_iyi_sonuc["_yerlesim_ham"]
                 deneme_veri["on_bos_gun_ata"] = False  # yerlesim zaten hazir, tekrar on-atama gerekmez
-                # Cilalama turlari HIZLIDIR (yeniden yerlestirme yok, sadece
-                # cilalama gecisleri) - kisa butce yeterli, daha fazla tur
-                # denenebilsin diye.
-                deneme_veri["_deneme_butcesi_sn"] = min(30, max(kalan - 5, 5))
+                # Cilalama turlari genelde HIZLIDIR (yeniden yerlestirme yok,
+                # sadece cilalama gecisleri) ama TUM gecislerin (bos-gun,
+                # fazla-bos-gun, pencere, brans-takas) tam bir tur icin
+                # yeterli zaman bulmasi icin butce biraz genis tutulur.
+                deneme_veri["_deneme_butcesi_sn"] = min(45, max(kalan - 5, 5))
             else:
                 # FAZ 1 hic basarili olmadiysa (nadir) FAZ 2'yi de tam cozum
                 # olarak dene - bos donmemek icin.
@@ -1492,6 +1506,8 @@ def arka_plan_arama(veri, sure_sn, ilerleme_fn=None, durdur_fn=None, tur_butcesi
             en_iyi_sonuc = sonuc
             en_iyi_sonuc["_tur_no"] = tur_no
             en_iyi_sonuc["_gecen_sn"] = round(gecen, 1)
+            if gelisti:
+                son_iyilesme_turu = tur_no  # takilma sayacini sifirla
             if gelisti and ilerleme_fn is not None:
                 try:
                     ilerleme_fn(tur_no, en_iyi_sonuc, en_iyi_skor, gecen)

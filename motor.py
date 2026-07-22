@@ -1442,6 +1442,37 @@ def arka_plan_arama(veri, sure_sn, ilerleme_fn=None, durdur_fn=None, tur_butcesi
     tur_no = 0
     mukemmel = (0, 0, 0, 0, 0, 0, 0)
     FAZ1_TUR_SAYISI = 5   # kesif icin kac tam cozum denensin, sonrasi cilalama
+
+    # KALDIGI YERDEN DEVAM: eger cagiran (frontend/app.py) veri icinde
+    # HAZIR bir 'baslangic_yerlesim' gonderdiyse (orn. kullanici daha once
+    # bir optimizasyon sonucunu UYGULADI ve simdi ONUN UZERINDEN devam
+    # etmek istiyor), bunu ISTATISTIGINI hesaplamak icin TEK bir hizli
+    # cagriyla 'baslangic' sonucu olarak kullaniriz ve FAZ 1'i (sifirdan
+    # rastgele kesif) TAMAMEN ATLARIZ - arama DOGRUDAN bu durumu
+    # cilalamaya baslar. Boylece 'Pencere Sayısını Azalt' butonuna
+    # birden fazla kez basmak HER SEFERINDE sifirdan baslamaz, en son
+    # uygulanan/bulunan duruma gore devam eder.
+    hazir_baslangic = veri.get("baslangic_yerlesim")
+    if hazir_baslangic:
+        ilk_veri = dict(veri)
+        ilk_veri["seed"] = taban_seed
+        ilk_veri["on_bos_gun_ata"] = False
+        ilk_veri["_deneme_butcesi_sn"] = min(45, sure_sn)
+        ilk_sonuc = _dagit_tek_deneme(ilk_veri)
+        if not ilk_sonuc.get("_butunluk_sorunu"):
+            en_iyi_sonuc = ilk_sonuc
+            en_iyi_skor = hesapla_skor(en_iyi_sonuc)
+            en_iyi_sonuc["_tur_no"] = 0
+            en_iyi_sonuc["_gecen_sn"] = round(time.time() - t0, 1)
+            if ilerleme_fn is not None:
+                try:
+                    ilerleme_fn(0, en_iyi_sonuc, en_iyi_skor, time.time() - t0)
+                except Exception:
+                    pass
+            FAZ1_TUR_SAYISI = 0  # kesif atlanir - direkt cilalamaya gec
+            print("[KALDIGI YERDEN DEVAM] hazir baslangic yerlesimi yuklendi, "
+                  "Faz 1 (sifirdan kesif) atlaniyor", flush=True)
+
     # 6-24 saatlik COK UZUN calismalar icin: cilalama bir SUREDIR
     # (TAKILMA_ESIGI tur boyunca) hic iyilesme saglamiyorsa, mevcut en
     # iyiden devam etmek yerine TAZE bir tam cozum (yeni rastgele siralama)

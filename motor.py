@@ -1116,7 +1116,13 @@ def _dagit_tek_deneme(veri):
                     if bloklanmis:
                         break
 
-                if bloklanmis or not cakisanlar or len(cakisanlar) > 3:
+                # ONEMLI: kovma zincir siniri 3'ten 6'ya cikarildi. %100 dolu
+                # siniflarda bir dersi bosluga tasimak COGUNLUKLA 3'ten fazla
+                # dersin zincirleme kovulmasini gerektiriyor - eski sinir bu
+                # yuzden pencere azaltmayi cok erken vazgeciriyordu. Artik
+                # cilalama turlari saatlerce calisabildigi icin (arka plan
+                # aramasi) daha derin/pahali denemelere izin vermek guvenli.
+                if bloklanmis or not cakisanlar or len(cakisanlar) > 6:
                     geri_al(nokta)
                     continue
 
@@ -1143,7 +1149,7 @@ def _dagit_tek_deneme(veri):
         yaklasir. Once en cok pencereli ogretmenden baslar. Idareci (2-12
         saat) ogretmenler ic pencere hedefinden MUAF - onlar zaten her gun
         okulda, pencere sayilari onemli degil."""
-        for _dis_tur in range(15):
+        for _dis_tur in range(25):
             if _zaman_doldu():
                 break
             pencereli = sorted(

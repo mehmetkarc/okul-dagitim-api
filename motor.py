@@ -1395,11 +1395,18 @@ def hesapla_skor(sonuc):
     hemen sonra) geliyor - hicbir kombinasyonda MEB kuralini ihlal eden
     bir sonuc, ihlal etmeyen bir sonuca karsi kazanamaz.
 
-    Ayrica pencere DAGILIMI da adil olmali - bir ogretmen 0 pencereyken
-    baskasi 12 pencereye sahip olmamali; bu yuzden pencere_max (en
-    yuksek tekil pencere degeri) pencere_toplam'dan ONCE gelir - once
-    EN KOTU durumdaki ogretmeni iyilestirmeye calisir, sonra genel
-    toplami.
+    Ayrica pencere DAGILIMI da adil olmali. ANCAK onemli bir DERS: daha
+    once pencere_max (en kotu tekil deger) burada pencere_fazla_sayisi'ndan
+    (kac ogretmen hedefin ustunde) ONCE gelecek sekilde siralanmisti - bu,
+    aramanin COK DAHA FAZLA ogretmeni hedefe (<=2) getiren gercek
+    iyilesmeleri, SADECE 1 ogretmenin en kotu degeri hafifce (orn. 8->9)
+    artiyor diye REDDETMESINE yol aciyordu (lexicographic karsilastirma
+    ilk farkli elemanda karar veriyor, pencere_max daha once geldigi icin
+    pencere_fazla_sayisi'ndaki BUYUK iyilesmeler hic goz onune alinamiyordu).
+    Kullanicidan gelen gercek gozlem ('pencere>2 sayisi saatlerce 42'de
+    sabit kaliyor') bunu dogruladi. Simdi ONCELIK TERS CEVRILDI:
+    pencere_fazla_sayisi (KAC OGRETMEN hedefte - asil onemli olan) ONCE
+    gelir, pencere_max SADECE esitlik durumunda (tie-break) devreye girer.
     """
     ist = sonuc.get("istatistik", {})
     return (
@@ -1407,11 +1414,8 @@ def hesapla_skor(sonuc):
         ist.get("fazla_bos_gun_sayisi", 0),              # 2) asla 2+ bos gun (MEB) - EN MUTLAK KURAL
         ist.get("min_ihlal_sayisi", 0),                 # 3) asla tek ders
         ist.get("sifir_bos_gun_sayisi", 0),              # 4) herkese bos gun (kapsama)
-        ist.get("pencere_max", 0),                       # 5) ADALET (ONCELIKLI): '1 ogretmende 10
-                                                          #    pencere' hicbir zaman '10 ogretmende
-                                                          #    2'ser pencere'den iyi sayilmaz - kullanici
-                                                          #    kararidir (pedagojik: yuk yayilmali)
-        ist.get("pencere_fazla_sayisi", 0),              # 6) pencere <=2 hedefine ulasan sayisi
+        ist.get("pencere_fazla_sayisi", 0),              # 5) ASIL HEDEF: kac ogretmen pencere<=2'nin ustunde
+        ist.get("pencere_max", 0),                       # 6) ADALET (tie-break): esit pencere_fazla'da en kotu tekil deger
         ist.get("pencere_toplam", 0),                    # 7) genel toplam (ince ayar)
     )
 

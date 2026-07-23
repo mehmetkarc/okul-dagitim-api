@@ -397,6 +397,14 @@ def _dagit_tek_deneme(veri):
     # (varsayilan) 3 yeterli ve hizli.
     MAX_DERINLIK = 5 if veri.get("on_bos_gun_ata") else 3
     DERIN_TAVAN = 8          # gec gecisler (tek-ders/bos-gun/pencere) icin - zaman siniri gevsek
+    # KOVMA ZINCIR SINIRI: pencere azaltirken bir dersi bosluga tasimak icin
+    # kac dersin zincirleme kovulmasina izin verildigi. Web akisinda (hizli
+    # kalmasi gerekir) dusuk tutulur, arka plan/yerel aramada (bol zaman
+    # var) veri icinde YUKSEK bir deger gonderilerek COK DAHA DERIN
+    # zincirlere izin verilebilir - bu, pencere azaltmanin en guclu
+    # aracidir, derinlik arttikca %100 dolu siniflarda bile daha fazla
+    # yeniden duzenleme kombinasyonu denenebilir hale gelir.
+    KOVMA_ZINCIR_SINIRI = int(veri.get("kovma_zincir_siniri", 6))
 
     def kontrol_noktasi():
         """O(1) - sadece log uzunlugunu kaydeder."""
@@ -1122,7 +1130,7 @@ def _dagit_tek_deneme(veri):
                 # yuzden pencere azaltmayi cok erken vazgeciriyordu. Artik
                 # cilalama turlari saatlerce calisabildigi icin (arka plan
                 # aramasi) daha derin/pahali denemelere izin vermek guvenli.
-                if bloklanmis or not cakisanlar or len(cakisanlar) > 6:
+                if bloklanmis or not cakisanlar or len(cakisanlar) > KOVMA_ZINCIR_SINIRI:
                     geri_al(nokta)
                     continue
 
@@ -1510,6 +1518,7 @@ def arka_plan_arama(veri, sure_sn, ilerleme_fn=None, durdur_fn=None, tur_butcesi
                 son_iyilesme_turu = tur_no  # tekrar tekrar taze baslangic denemesin, sayaci sifirla
             deneme_veri["on_bos_gun_ata"] = (tur_no % 4 == 0)
             deneme_veri["_deneme_butcesi_sn"] = min(tur_butcesi_sn, max(kalan - 5, 10))
+            deneme_veri["kovma_zincir_siniri"] = 15  # kesif turlari - orta derinlik, hizli kalsin
         else:
             # ---- FAZ 2: ARTIMLI CILALAMA - onceki en iyiden devam ----
             if en_iyi_sonuc is not None and en_iyi_sonuc.get("_yerlesim_ham"):
@@ -1520,11 +1529,19 @@ def arka_plan_arama(veri, sure_sn, ilerleme_fn=None, durdur_fn=None, tur_butcesi
                 # fazla-bos-gun, pencere, brans-takas) tam bir tur icin
                 # yeterli zaman bulmasi icin butce biraz genis tutulur.
                 deneme_veri["_deneme_butcesi_sn"] = min(45, max(kalan - 5, 5))
+                # CILALAMA turlarinda YERLESTIRME ZATEN HAZIR (baslangic_
+                # yerlesim ile) - bu yuzden zamanin NEREDEYSE TAMAMI dogrudan
+                # pencere azaltma gecislerine gidiyor. Kullanicinin talebi
+                # uzerine burada COK DAHA DERIN kovma zincirlerine izin
+                # verilir - saatlerce suren arka plan aramasinin asil gucu
+                # burada devreye girer.
+                deneme_veri["kovma_zincir_siniri"] = 50
             else:
                 # FAZ 1 hic basarili olmadiysa (nadir) FAZ 2'yi de tam cozum
                 # olarak dene - bos donmemek icin.
                 deneme_veri["on_bos_gun_ata"] = (tur_no % 4 == 0)
                 deneme_veri["_deneme_butcesi_sn"] = min(tur_butcesi_sn, max(kalan - 5, 10))
+                deneme_veri["kovma_zincir_siniri"] = 15
 
         sonuc = _dagit_tek_deneme(deneme_veri)
 

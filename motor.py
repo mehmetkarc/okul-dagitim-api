@@ -472,7 +472,7 @@ def _dagit_tek_deneme(veri):
                     continue  # kilitli hucre - asla kovulamaz, bu saati atla
                 if not cakisanlar:
                     continue  # bos slot olsaydi en_iyi_aday zaten bulurdu; atla
-                if len(cakisanlar) > 2:
+                if len(cakisanlar) > KOVMA_ZINCIR_SINIRI:
                     continue  # cok fazla kovma riskli
 
                 cakisanlar = sorted(cakisanlar)  # deterministik sira (set iterasyonu PYTHONHASHSEED'e bagli)
@@ -548,7 +548,7 @@ def _dagit_tek_deneme(veri):
                             cakisanlar.add(occ2)
                     if bloklanmis:
                         break
-                if bloklanmis or not cakisanlar or len(cakisanlar) > 3:
+                if bloklanmis or not cakisanlar or len(cakisanlar) > KOVMA_ZINCIR_SINIRI:
                     continue
                 nokta = kontrol_noktasi()
                 for cg in sorted(cakisanlar):
@@ -607,7 +607,7 @@ def _dagit_tek_deneme(veri):
                         cakisanlar.add(occ2)
                 if bloklanmis:
                     break
-            if bloklanmis or not cakisanlar or len(cakisanlar) > 3:
+            if bloklanmis or not cakisanlar or len(cakisanlar) > KOVMA_ZINCIR_SINIRI:
                 continue
             nokta = kontrol_noktasi()
             for cg in sorted(cakisanlar):

@@ -1037,7 +1037,12 @@ def _dagit_tek_deneme(veri):
         return toplam
 
     def gun_ici_sikistir(tc, gun):
-        """Bir gun icindeki dagilmis dersleri sola dogru sikistirir."""
+        """Bir gun icindeki dagilmis dersleri sola dogru sikistirir. Once
+        hedef saat BOSSA dogrudan tasir; BOSSA DEGILSE (baska bir ders
+        varsa) o dersle YER DEGISTIRMEYI (swap) dener - bu, once sadece
+        bos hucre araniyorken atlanan COK SAYIDA sikistirma firsatini
+        yakalar (ozellikle yogun/dolu programlarda hedef saat neredeyse
+        HICBIR ZAMAN bos degildir)."""
         degisti_toplam = False
         for _ic_tur in range(8):
             tasklar = sorted(
@@ -1050,14 +1055,38 @@ def _dagit_tek_deneme(veri):
                 gun2, saat2 = t["placed"]
                 if saat2 <= 1:
                     continue
+                hedef_saat = saat2 - 1
                 nokta = kontrol_noktasi()
                 bosalt(t["id"])
-                if musait_mi(t["id"], gun2, saat2 - 1):
-                    yerlestir(t["id"], gun2, saat2 - 1)
+                if musait_mi(t["id"], gun2, hedef_saat):
+                    yerlestir(t["id"], gun2, hedef_saat)
                     degisti = True
                     degisti_toplam = True
-                else:
-                    geri_al(nokta)
+                    continue
+                # Hedef saat dolu - o saati isgal eden TEK bir gorev varsa
+                # YER DEGISTIRMEYI dene (iki dersin saatini karsilikli
+                # takas et). Kilitli hucrelere veya birden fazla gorevin
+                # ayni saatte cakistigi (coklu-blok) durumlara DOKUNULMAZ.
+                isgal_eden = class_occ.get(t["sid"], {}).get((gun2, hedef_saat))
+                if isgal_eden and isgal_eden != t["id"]:
+                    g2 = gid_map.get(isgal_eden)
+                    if (g2 and g2["sid"] == t["sid"] and g2["placed"] == (gun2, hedef_saat)
+                            and g2["boy"] == t["boy"]):
+                        once_ihlal = ihlal_sayisi()
+                        bosalt(g2["id"])
+                        if musait_mi(g2["id"], gun2, saat2) and musait_mi(t["id"], gun2, hedef_saat):
+                            yerlestir(g2["id"], gun2, saat2)
+                            yerlestir(t["id"], gun2, hedef_saat)
+                            if ihlal_sayisi() > once_ihlal:
+                                geri_al(nokta)  # yeni tek-ders ihlali yarattiysa vazgec
+                            else:
+                                degisti = True
+                                degisti_toplam = True
+                            continue
+                        else:
+                            geri_al(nokta)
+                            continue
+                geri_al(nokta)
             if not degisti:
                 break
         return degisti_toplam

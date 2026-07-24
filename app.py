@@ -79,7 +79,7 @@ def saglik():
     import motor as _motor_modul
     return jsonify({
         "durum": "aktif",
-        "versiyon": "4.1.0-pencere-fazla-oncelik",
+        "versiyon": "4.3.0-supabase-arka-plan-thread",
         "motor_dosya": _motor_modul.__file__,
         "asama_yapisi_var_mi": hasattr(_motor_modul, "_dagit_tek_deneme"),
         "arka_plan_arama_var_mi": hasattr(_motor_modul, "arka_plan_arama"),
@@ -162,11 +162,28 @@ def _is_calistir(job_id, veri, sure_sn, tur_butcesi_sn, okul_kodu):
         # KALICI KAYIT: her yeni en iyi sonuc bulundugunda Supabase'e de
         # yazilir - boylece sunucu yeniden baslasa bile EN AZ bu son iyi
         # sonuc kaybolmaz.
-        _supabase_is_kaydet(job_id, {
-            "okul_kodu": okul_kodu, "durum": "calisiyor", "tur_no": tur_no,
-            "gecen_sn": round(gecen_sn, 1), "hedef_sn": sure_sn,
-            "en_iyi_ozet": ozet, "en_iyi_sonuc": en_iyi_sonuc,
-        })
+        #
+        # KRITIK DUZELTME: bu artik AYRI BIR THREAD'DE (fire-and-forget)
+        # yapiliyor - ONCEDEN ana arama dongusunun IcINDE, SENKRON
+        # (bloklayici) olarak calisiyordu. Eger Supabase'e giden ag
+        # istegi herhangi bir nedenle asilirsa (DNS, yavas baglanti,
+        # gecici kesinti - render.com'un kendi alan adinda bile daha
+        # once gordugumuz turden bir sorun), TUM arama dongusu onunla
+        # BIRLIKTE donuyordu - kullanicinin yasadigi 'tur 38'de saatlerce
+        # takili kalma' sorununun KOK NEDENI muhtemelen buydu. Artik bu
+        # cagri AYRI bir thread'de calisiyor - hata verse veya asilsa
+        # bile ANA ARAMA DONGUSU HICBIR SEKILDE ETKILENMEZ, kesintisiz
+        # devam eder.
+        def _kalici_kaydet_arka_planda():
+            try:
+                _supabase_is_kaydet(job_id, {
+                    "okul_kodu": okul_kodu, "durum": "calisiyor", "tur_no": tur_no,
+                    "gecen_sn": round(gecen_sn, 1), "hedef_sn": sure_sn,
+                    "en_iyi_ozet": ozet, "en_iyi_sonuc": en_iyi_sonuc,
+                })
+            except Exception as e:
+                print(f"[SUPABASE] arka plan kayit hatasi (ana aramayi ETKILEMEZ): {e}", flush=True)
+        threading.Thread(target=_kalici_kaydet_arka_planda, daemon=True).start()
 
     def durdur_mu():
         with _isler_kilit:

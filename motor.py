@@ -405,6 +405,7 @@ def _dagit_tek_deneme(veri):
     # aracidir, derinlik arttikca %100 dolu siniflarda bile daha fazla
     # yeniden duzenleme kombinasyonu denenebilir hale gelir.
     KOVMA_ZINCIR_SINIRI = int(veri.get("kovma_zincir_siniri", 6))
+    MAX_PENCERE_HEDEF = 2  # erken tasindi - zaman_takasi_pencere_pass (asagida, 9b civari) bunu kullaniyor
 
     def kontrol_noktasi():
         """O(1) - sadece log uzunlugunu kaydeder."""
@@ -893,6 +894,38 @@ def _dagit_tek_deneme(veri):
         geri_al(nokta)
         return False
 
+    def _zaman_takasi_uygula(gid1, gid2):
+        """BRANSTAN BAGIMSIZ zaman-dilimi takasi: iki dersin GUN/SAATini
+        birbiriyle degistirir - HANGI OGRETMENIN OGRETTIGI DEGISMEZ,
+        sadece NE ZAMAN ogretildigi degisir. Bu, _takasi_uygula'nin
+        (ogretmen degisir, zaman sabit kalir) TAM TAMAMLAYICISIDIR -
+        ASC/FET gibi profesyonel programlarin kullandigi asil guclu
+        hareket budur, cunku ayni branstan bir takas ortagi GEREKTIRMEZ -
+        HERHANGI IKI DERS (farkli sinif, farkli ogretmen, farkli brans
+        olsa bile) zamanlarini takas edebilir."""
+        g1, g2 = gid_map[gid1], gid_map[gid2]
+        if not g1["placed"] or not g2["placed"] or g1["boy"] != g2["boy"]:
+            return False
+        gun1, saat1 = g1["placed"]
+        gun2, saat2 = g2["placed"]
+        if (gun1, saat1) == (gun2, saat2):
+            return False
+        once_ihlal = ihlal_sayisi()
+        once_fazla = fazla_bos_gun_toplam()
+        nokta = kontrol_noktasi()
+        bosalt(gid1)
+        bosalt(gid2)
+        if musait_mi(gid1, gun2, saat2) and musait_mi(gid2, gun1, saat1):
+            yerlestir(gid1, gun2, saat2)
+            yerlestir(gid2, gun1, saat1)
+            if ihlal_sayisi() > once_ihlal or fazla_bos_gun_toplam() > once_fazla:
+                geri_al(nokta)
+                return False
+            return True
+        geri_al(nokta)
+        return False
+
+
     # ---------------- 9b. Fazla bos gunu BRANS TAKASIYLA doldurmayi zorla ----------------
     # fazla_bos_gun_konsolide_pass (dogrudan doldur/swap) bazi ogretmenler icin
     # basarisiz kalabiliyor (hedef sinif zaten dolu). Bu son care: o gundeki
@@ -1018,7 +1051,6 @@ def _dagit_tek_deneme(veri):
     tek_ders_yasakla_pass()
 
     # ---------------- 8. Pencere minimizasyonu (hedef: haftalik <=2 pencere) ----------------
-    MAX_PENCERE_HEDEF = 2
 
     def ogrt_gun_saatleri(tc, gun):
         saatler = []
@@ -1205,6 +1237,77 @@ def _dagit_tek_deneme(veri):
                 break
 
     pencere_azalt_pass()
+    def zaman_takasi_pencere_pass():
+        """En cok pencereli ogretmenden baslayarak, HERHANGI baska bir
+        dersle (brans siniri OLMADAN) zaman takasi deneyerek pencereyi
+        azaltmaya calisir. _takasi_uygula (brans takasi) ile
+        _zaman_takasi_uygula (zaman takasi) birlikte, ASC/FET'in
+        yaptigina cok daha yakin bir arama gucu saglar."""
+        for _dis_tur in range(15):
+            if _zaman_doldu():
+                break
+            pencereli = sorted(
+                (tc for tc in tum_tc if not idareci_mi[tc] and ogrt_haftalik_pencere(tc) > MAX_PENCERE_HEDEF),
+                key=lambda tc: -ogrt_haftalik_pencere(tc))
+            if not pencereli:
+                break
+            herhangi_degisti = False
+            for tc in pencereli:
+                if _zaman_doldu():
+                    break
+                once_pencere = ogrt_haftalik_pencere(tc)
+                # tc'nin bos (pencereli) saatlerini bul: calisilan gunlerde,
+                # tc'nin ILK ve SON ders saati arasinda kalan ama derste
+                # OLMADIGI saatler.
+                bos_hucreler = []
+                for gun in gunler:
+                    saatler_o_gun = sorted(s for g in gorevler if tc in tum_ogrt(g) and g["placed"]
+                                            and g["placed"][0] == gun
+                                            for s in range(g["placed"][1], g["placed"][1] + g["boy"]))
+                    if len(saatler_o_gun) < 2:
+                        continue
+                    for s in range(min(saatler_o_gun), max(saatler_o_gun) + 1):
+                        if s not in saatler_o_gun:
+                            bos_hucreler.append((gun, s))
+                if not bos_hucreler:
+                    continue
+                # tc'nin TASINABILIR (tek saatlik, esnek) derslerini bul -
+                # bu dersleri bos_hucreler'den birine tasimaya calisacagiz.
+                tc_tasklari = [g for g in gorevler if tc in tum_ogrt(g) and g["placed"]]
+                basarili_oldu = False
+                for bos_gun, bos_saat in bos_hucreler:
+                    if basarili_oldu:
+                        break
+                    # O bos hucreyi (bos_gun, bos_saat) HANGI ders isgal
+                    # ediyor - HERHANGI bir sinif/ogretmen/brans olabilir.
+                    for g2 in gorevler:
+                        if not g2["placed"] or g2["placed"] != (bos_gun, bos_saat):
+                            continue
+                        if tc in tum_ogrt(g2):
+                            continue  # zaten tc'nin kendi dersi (baska bir blok) - atla
+                        for g1 in tc_tasklari:
+                            if g1["boy"] != g2["boy"]:
+                                continue
+                            if _zaman_takasi_uygula(g1["id"], g2["id"]):
+                                yeni_pencere = ogrt_haftalik_pencere(tc)
+                                if yeni_pencere < once_pencere:
+                                    herhangi_degisti = True
+                                    basarili_oldu = True
+                                    break
+                                else:
+                                    # Iyilesme saglamadi - geri al (baska bir
+                                    # ogretmenin pencere'sini kotulestirmis
+                                    # olabilir, faydasiz risk almayalim)
+                                    _zaman_takasi_uygula(g1["id"], g2["id"])
+                            if basarili_oldu:
+                                break
+                        if basarili_oldu:
+                            break
+            if not herhangi_degisti:
+                break
+
+    zaman_takasi_pencere_pass()
+
 
     # ---------------- 8b. Son guvenlik agi: pencere/tek-ders gecisleri yan etki yaratmis olabilir ----------------
     # pencere_azalt_pass yalnizca pencereyi optimize eder, min-gunluk-saat VE

@@ -473,8 +473,8 @@ def _dagit_tek_deneme(veri):
                     continue  # kilitli hucre - asla kovulamaz, bu saati atla
                 if not cakisanlar:
                     continue  # bos slot olsaydi en_iyi_aday zaten bulurdu; atla
-                if len(cakisanlar) > KOVMA_ZINCIR_SINIRI:
-                    continue  # cok fazla kovma riskli
+                if len(cakisanlar) > 2:
+                    continue  # cok fazla kovma riskli - SABIT deger (ozyinelemeli motor, guvenlik icin degistirilemez)
 
                 cakisanlar = sorted(cakisanlar)  # deterministik sira (set iterasyonu PYTHONHASHSEED'e bagli)
                 nokta = kontrol_noktasi()
@@ -549,8 +549,8 @@ def _dagit_tek_deneme(veri):
                             cakisanlar.add(occ2)
                     if bloklanmis:
                         break
-                if bloklanmis or not cakisanlar or len(cakisanlar) > KOVMA_ZINCIR_SINIRI:
-                    continue
+                if bloklanmis or not cakisanlar or len(cakisanlar) > 3:
+                    continue  # SABIT deger (ozyinelemeli motoru cagirir, guvenlik icin degistirilemez)
                 nokta = kontrol_noktasi()
                 for cg in sorted(cakisanlar):
                     bosalt(cg)
@@ -608,8 +608,8 @@ def _dagit_tek_deneme(veri):
                         cakisanlar.add(occ2)
                 if bloklanmis:
                     break
-            if bloklanmis or not cakisanlar or len(cakisanlar) > KOVMA_ZINCIR_SINIRI:
-                continue
+            if bloklanmis or not cakisanlar or len(cakisanlar) > 3:
+                continue  # SABIT deger (ozyinelemeli motoru cagirir, guvenlik icin degistirilemez)
             nokta = kontrol_noktasi()
             for cg in sorted(cakisanlar):
                 bosalt(cg)
@@ -1185,13 +1185,14 @@ def _dagit_tek_deneme(veri):
                     if bloklanmis:
                         break
 
-                # ONEMLI: kovma zincir siniri 3'ten 6'ya cikarildi. %100 dolu
-                # siniflarda bir dersi bosluga tasimak COGUNLUKLA 3'ten fazla
-                # dersin zincirleme kovulmasini gerektiriyor - eski sinir bu
-                # yuzden pencere azaltmayi cok erken vazgeciriyordu. Artik
-                # cilalama turlari saatlerce calisabildigi icin (arka plan
-                # aramasi) daha derin/pahali denemelere izin vermek guvenli.
-                if bloklanmis or not cakisanlar or len(cakisanlar) > KOVMA_ZINCIR_SINIRI:
+                # GUVENLIK: bu deger artik SABIT (6) - KOVMA_ZINCIR_SINIRI'ye
+                # baglanmasi (kullanicinin arka plan aramasinda 50'ye kadar
+                # cikmasina izin vermesi) ozyinelemeli yerlestirmeye_calis
+                # motorunda USTEL yavaslamaya/donmaya yol aciyordu (874
+                # gorevin her biri icin cagriliyor). Pencere azaltma gucu
+                # artik bunun yerine ozyinelemesiz zaman_takasi_pencere_pass
+                # ile saglaniyor.
+                if bloklanmis or not cakisanlar or len(cakisanlar) > 6:
                     geri_al(nokta)
                     continue
 

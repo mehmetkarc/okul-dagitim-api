@@ -1242,7 +1242,12 @@ def _dagit_tek_deneme(veri):
         dersle (brans siniri OLMADAN) zaman takasi deneyerek pencereyi
         azaltmaya calisir. _takasi_uygula (brans takasi) ile
         _zaman_takasi_uygula (zaman takasi) birlikte, ASC/FET'in
-        yaptigina cok daha yakin bir arama gucu saglar."""
+        yaptigina cok daha yakin bir arama gucu saglar.
+
+        PERFORMANS: (gun,saat)->gid indeksi _dis_tur basina BIR KEZ
+        kurulur (874 gorevi HER bos hucre icin tek tek taramak yerine) -
+        onceki surum bunu yapmiyordu ve COK YAVAS calisiyordu (pratikte
+        donmus gibi gorunuyordu)."""
         for _dis_tur in range(15):
             if _zaman_doldu():
                 break
@@ -1251,14 +1256,23 @@ def _dagit_tek_deneme(veri):
                 key=lambda tc: -ogrt_haftalik_pencere(tc))
             if not pencereli:
                 break
+
+            # Indeks: (gun,saat) -> o saati kaplayan gorev id'leri (coklu-
+            # saat bloklarin HER saati icin ayri kayit). Bu, "bu saatte ne
+            # var" sorgusunu O(874)'ten O(1)'e indirir.
+            zaman_index = {}
+            for g in gorevler:
+                if not g["placed"]:
+                    continue
+                gp, sp = g["placed"]
+                for b in range(g["boy"]):
+                    zaman_index.setdefault((gp, sp + b), []).append(g["id"])
+
             herhangi_degisti = False
             for tc in pencereli:
                 if _zaman_doldu():
                     break
                 once_pencere = ogrt_haftalik_pencere(tc)
-                # tc'nin bos (pencereli) saatlerini bul: calisilan gunlerde,
-                # tc'nin ILK ve SON ders saati arasinda kalan ama derste
-                # OLMADIGI saatler.
                 bos_hucreler = []
                 for gun in gunler:
                     saatler_o_gun = sorted(s for g in gorevler if tc in tum_ogrt(g) and g["placed"]
@@ -1271,23 +1285,22 @@ def _dagit_tek_deneme(veri):
                             bos_hucreler.append((gun, s))
                 if not bos_hucreler:
                     continue
-                # tc'nin TASINABILIR (tek saatlik, esnek) derslerini bul -
-                # bu dersleri bos_hucreler'den birine tasimaya calisacagiz.
                 tc_tasklari = [g for g in gorevler if tc in tum_ogrt(g) and g["placed"]]
                 basarili_oldu = False
                 for bos_gun, bos_saat in bos_hucreler:
-                    if basarili_oldu:
+                    if basarili_oldu or _zaman_doldu():
                         break
-                    # O bos hucreyi (bos_gun, bos_saat) HANGI ders isgal
-                    # ediyor - HERHANGI bir sinif/ogretmen/brans olabilir.
-                    for g2 in gorevler:
-                        if not g2["placed"] or g2["placed"] != (bos_gun, bos_saat):
-                            continue
+                    # Indeksten O(1) bak - o saati isgal eden gorev(ler)i
+                    # DOGRUDAN bul, 874 gorevi TARAMA.
+                    adaylar = zaman_index.get((bos_gun, bos_saat), [])
+                    for g2_id in adaylar:
+                        g2 = gid_map[g2_id]
                         if tc in tum_ogrt(g2):
-                            continue  # zaten tc'nin kendi dersi (baska bir blok) - atla
+                            continue  # zaten tc'nin kendi dersi - atla
                         for g1 in tc_tasklari:
                             if g1["boy"] != g2["boy"]:
                                 continue
+                            nokta = kontrol_noktasi()
                             if _zaman_takasi_uygula(g1["id"], g2["id"]):
                                 yeni_pencere = ogrt_haftalik_pencere(tc)
                                 if yeni_pencere < once_pencere:
@@ -1295,10 +1308,7 @@ def _dagit_tek_deneme(veri):
                                     basarili_oldu = True
                                     break
                                 else:
-                                    # Iyilesme saglamadi - geri al (baska bir
-                                    # ogretmenin pencere'sini kotulestirmis
-                                    # olabilir, faydasiz risk almayalim)
-                                    _zaman_takasi_uygula(g1["id"], g2["id"])
+                                    geri_al(nokta)  # iyilesme yok - direkt kontrol noktasindan geri don
                             if basarili_oldu:
                                 break
                         if basarili_oldu:

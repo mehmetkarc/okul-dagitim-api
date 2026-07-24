@@ -79,7 +79,7 @@ def saglik():
     import motor as _motor_modul
     return jsonify({
         "durum": "aktif",
-        "versiyon": "4.0.0-kalici-depolama",
+        "versiyon": "4.1.0-pencere-fazla-oncelik",
         "motor_dosya": _motor_modul.__file__,
         "asama_yapisi_var_mi": hasattr(_motor_modul, "_dagit_tek_deneme"),
         "arka_plan_arama_var_mi": hasattr(_motor_modul, "arka_plan_arama"),

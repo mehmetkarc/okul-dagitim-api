@@ -160,6 +160,19 @@ def _is_calistir(job_id, veri, sure_sn, tur_butcesi_sn, okul_kodu):
             is_kaydi["gecen_sn"] = round(gecen_sn, 1)
             is_kaydi["en_iyi_sonuc"] = en_iyi_sonuc
             is_kaydi["en_iyi_ozet"] = ozet
+            # TREND GECMISI: her yeni en iyi bulunusta (tur_no, gecen_sn,
+            # pencere_fazla) kaydedilir - boylece aramanin GERCEKTEN
+            # ilerleyip ilerlemedigi (yavas ama surekli dusme mi, yoksa
+            # ayni degerde donuk mu kaldigi) /durum uzerinden GORULEBILIR,
+            # tahmin etmeye gerek kalmaz.
+            gecmis = is_kaydi.setdefault("gecmis", [])
+            gecmis.append({
+                "tur_no": tur_no, "gecen_sn": round(gecen_sn, 1),
+                "pencere_fazla_sayisi": ozet["pencere_fazla_sayisi"],
+                "pencere_max": ozet["pencere_max"],
+            })
+            if len(gecmis) > 50:
+                del gecmis[:-50]  # sadece son 50 iyilesmeyi tut
         # KALICI KAYIT: her yeni en iyi sonuc bulundugunda Supabase'e de
         # yazilir - boylece sunucu yeniden baslasa bile EN AZ bu son iyi
         # sonuc kaybolmaz.
@@ -175,12 +188,15 @@ def _is_calistir(job_id, veri, sure_sn, tur_butcesi_sn, okul_kodu):
         # cagri AYRI bir thread'de calisiyor - hata verse veya asilsa
         # bile ANA ARAMA DONGUSU HICBIR SEKILDE ETKILENMEZ, kesintisiz
         # devam eder.
+        with _isler_kilit:
+            _gecmis_kopya = list(_isler.get(job_id, {}).get("gecmis", []))
+
         def _kalici_kaydet_arka_planda():
             try:
                 _supabase_is_kaydet(job_id, {
                     "okul_kodu": okul_kodu, "durum": "calisiyor", "tur_no": tur_no,
                     "gecen_sn": round(gecen_sn, 1), "hedef_sn": sure_sn,
-                    "en_iyi_ozet": ozet, "en_iyi_sonuc": en_iyi_sonuc,
+                    "en_iyi_ozet": ozet, "en_iyi_sonuc": en_iyi_sonuc, "gecmis": _gecmis_kopya,
                 })
             except Exception as e:
                 print(f"[SUPABASE] arka plan kayit hatasi (ana aramayi ETKILEMEZ): {e}", flush=True)
@@ -280,6 +296,7 @@ def pencere_optimize_durum(job_id):
                 "gecen_sn": kayit["gecen_sn"],
                 "hedef_sn": kayit["hedef_sn"],
                 "en_iyi_ozet": kayit["en_iyi_ozet"],
+                "gecmis": kayit.get("gecmis", []),
                 "hata": kayit["hata"],
             })
     # Bellekte yok (sunucu yeniden baslamis olabilir) - Supabase'e bak
@@ -291,6 +308,7 @@ def pencere_optimize_durum(job_id):
             "gecen_sn": sb_kayit.get("gecen_sn"),
             "hedef_sn": sb_kayit.get("hedef_sn"),
             "en_iyi_ozet": sb_kayit.get("en_iyi_ozet"),
+            "gecmis": sb_kayit.get("gecmis", []),
             "hata": sb_kayit.get("hata"),
             "_kaynak": "supabase_kurtarma",
         })

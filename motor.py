@@ -1257,22 +1257,33 @@ def _dagit_tek_deneme(veri):
         Bu, 'donma' riskini SIFIRA indirmek icin cift guvenlik katmanidir."""
         _deneme_sayaci = 0
         _MAKS_DENEME = 2_000_000  # her deneme artik ucuz (O(1) indeks) - asil sinir zaman butcesi
+
+        def _pencere_hizli(tc, gun_index):
+            """ogrt_haftalik_pencere ile AYNI sonucu verir ama 874 gorevi
+            TARAMAZ - onceden kurulmus gun_index'ten O(gun_sayisi) okur.
+            KRITIK PERFORMANS DUZELTMESI: global kontrol eklendikten sonra
+            pencere hesaplama COK DAHA SIK cagriliyordu (deneme basina
+            4-6 kez) - eski O(874) tarama bu yuzden COK ciddi bir
+            yavaslama kaynagi olmustu."""
+            toplam = 0
+            for gun, saatler_ham in gun_index.get(tc, {}).items():
+                saatler = sorted(set(saatler_ham))
+                if len(saatler) < 2:
+                    continue
+                toplam += (max(saatler) - min(saatler) + 1) - len(saatler)
+            return toplam
+
         for _dis_tur in range(15):
             if _zaman_doldu() or _deneme_sayaci > _MAKS_DENEME:
-                break
-            pencereli = sorted(
-                (tc for tc in tum_tc if not idareci_mi[tc] and ogrt_haftalik_pencere(tc) > MAX_PENCERE_HEDEF),
-                key=lambda tc: -ogrt_haftalik_pencere(tc))
-            if not pencereli:
                 break
 
             # Indeks: (gun,saat) -> o saati kaplayan gorev id'leri (coklu-
             # saat bloklarin HER saati icin ayri kayit). Bu, "bu saatte ne
             # var" sorgusunu O(874)'ten O(1)'e indirir.
             zaman_index = {}
-            # Indeks: tc -> {gun: [saatler]} - bos_hucreler hesaplamasi
-            # ARTIK HER problemli ogretmen icin 874 gorevi taramiyor,
-            # bunun yerine bu indeksten O(1) okuyor.
+            # Indeks: tc -> {gun: [saatler]} - pencere hesaplamasi ve
+            # bos_hucreler ARTIK HER problemli ogretmen icin 874 gorevi
+            # taramiyor, bunun yerine bu indeksten O(1) okuyor.
             ogrt_gun_index = {}
             tc_gorev_index = {}
             for g in gorevler:
@@ -1285,6 +1296,12 @@ def _dagit_tek_deneme(veri):
                     d = ogrt_gun_index.setdefault(otc, {}).setdefault(gp, [])
                     d.extend(range(sp, sp + g["boy"]))
                     tc_gorev_index.setdefault(otc, []).append(g)
+
+            pencereli = sorted(
+                (tc for tc in tum_tc if not idareci_mi[tc] and _pencere_hizli(tc, ogrt_gun_index) > MAX_PENCERE_HEDEF),
+                key=lambda tc: -_pencere_hizli(tc, ogrt_gun_index))
+            if not pencereli:
+                break
 
             herhangi_degisti = False
             for tc in pencereli:
@@ -1303,7 +1320,7 @@ def _dagit_tek_deneme(veri):
                 for _ic_deneme in range(8):
                     if _zaman_doldu() or _deneme_sayaci > _MAKS_DENEME:
                         break
-                    once_pencere = ogrt_haftalik_pencere(tc)
+                    once_pencere = _pencere_hizli(tc, ogrt_gun_index)
                     if once_pencere <= MAX_PENCERE_HEDEF:
                         break  # bu ogretmen icin hedefe zaten ulasildi
                     bos_hucreler = []
@@ -1336,23 +1353,55 @@ def _dagit_tek_deneme(veri):
                             # ogretmen(ler)in mevcut pencere degerini
                             # kaydediyoruz, SONRA karsilastiracagiz.
                             digerleri = [t for t in tum_ogrt(g2) if t != tc]
-                            once_digerleri = {t: ogrt_haftalik_pencere(t) for t in digerleri}
+                            once_digerleri = {t: _pencere_hizli(t, ogrt_gun_index) for t in digerleri}
                             for g1 in tc_tasklari:
                                 if g1["boy"] != g2["boy"]:
                                     continue
                                 _deneme_sayaci += 1
                                 nokta = kontrol_noktasi()
                                 if _zaman_takasi_uygula(g1["id"], g2["id"]):
-                                    yeni_pencere = ogrt_haftalik_pencere(tc)
-                                    # BASKA HICBIR OGRETMENIN penceresi
-                                    # ARTMAMIS olmali (esitlik/iyilesme
-                                    # kabul edilir, kotulesme ASLA kabul
-                                    # edilmez).
+                                    # UCUZ HESAPLAMA: 874 gorevi TARAMADAN,
+                                    # etkilenen ogretmenin KENDI (kucuk,
+                                    # ~15-20 gorevlik) listesini CANLI
+                                    # OKUYARAK (g["placed"] takastan sonra
+                                    # otomatik guncel) pencere hesapla. Bu
+                                    # liste (tc_gorev_index) o ogretmenin
+                                    # HANGI gorevleri oldugunu gosterir -
+                                    # bu bilgi takastan ETKILENMEZ (sadece
+                                    # NE ZAMAN oldugu degisir), bu yuzden
+                                    # STALE degildir.
+                                    def _pencere_canli(hedef_tc):
+                                        gun_saat = {}
+                                        for g in tc_gorev_index.get(hedef_tc, []):
+                                            if not g["placed"]:
+                                                continue
+                                            gp2, sp2 = g["placed"]
+                                            gun_saat.setdefault(gp2, []).extend(range(sp2, sp2 + g["boy"]))
+                                        toplam = 0
+                                        for saatler_ham in gun_saat.values():
+                                            saatler = sorted(set(saatler_ham))
+                                            if len(saatler) < 2:
+                                                continue
+                                            toplam += (max(saatler) - min(saatler) + 1) - len(saatler)
+                                        return toplam
+
+                                    yeni_pencere = _pencere_canli(tc)
                                     kotulesen_var = any(
-                                        ogrt_haftalik_pencere(t) > once_digerleri[t] for t in digerleri)
+                                        _pencere_canli(t) > once_digerleri[t] for t in digerleri)
                                     if yeni_pencere < once_pencere and not kotulesen_var:
                                         herhangi_degisti = True
                                         basarili_oldu = True
+                                        # KABUL EDILDI - ogrt_gun_index'i
+                                        # SADECE simdi, kalici olarak
+                                        # guncelle (ayni ucuz yontemle).
+                                        for etkilenen in {tc} | set(digerleri):
+                                            yeni_gun_saat = {}
+                                            for g in tc_gorev_index.get(etkilenen, []):
+                                                if g["placed"]:
+                                                    gp2, sp2 = g["placed"]
+                                                    yeni_gun_saat.setdefault(gp2, []).extend(
+                                                        range(sp2, sp2 + g["boy"]))
+                                            ogrt_gun_index[etkilenen] = yeni_gun_saat
                                         break
                                     else:
                                         geri_al(nokta)
@@ -1362,17 +1411,6 @@ def _dagit_tek_deneme(veri):
                                 break
                     if not basarili_oldu:
                         break  # bu ogretmen icin bu turda daha fazla iyilestirme bulunamadi
-                    # tc_gorev_index/ogrt_gun_index'i bu ogretmen icin
-                    # yeniden kur (takas sonrasi degisti) - digerlerine
-                    # dokunmadan sadece BU ogretmenin ve etkilenen g2'nin
-                    # kayitlarini tazele.
-                    ogrt_gun_index[tc] = {}
-                    tc_gorev_index[tc] = []
-                    for g in gorevler:
-                        if g["placed"] and tc in tum_ogrt(g):
-                            gp, sp = g["placed"]
-                            ogrt_gun_index[tc].setdefault(gp, []).extend(range(sp, sp + g["boy"]))
-                            tc_gorev_index[tc].append(g)
 
     zaman_takasi_pencere_pass()
 

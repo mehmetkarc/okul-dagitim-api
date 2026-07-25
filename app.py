@@ -80,6 +80,7 @@ def saglik():
     return jsonify({
         "durum": "aktif",
         "versiyon": "4.3.0-supabase-arka-plan-thread",
+        "motor_versiyon": getattr(_motor_modul, "MOTOR_VERSIYON", "BILINMIYOR (eski motor.py - MOTOR_VERSIYON yok)"),
         "motor_dosya": _motor_modul.__file__,
         "asama_yapisi_var_mi": hasattr(_motor_modul, "_dagit_tek_deneme"),
         "arka_plan_arama_var_mi": hasattr(_motor_modul, "arka_plan_arama"),

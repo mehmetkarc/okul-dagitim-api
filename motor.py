@@ -1256,7 +1256,7 @@ def _dagit_tek_deneme(veri):
         deneme sayisi bir ust siniri asinca pass KESIN olarak durur.
         Bu, 'donma' riskini SIFIRA indirmek icin cift guvenlik katmanidir."""
         _deneme_sayaci = 0
-        _MAKS_DENEME = 20000
+        _MAKS_DENEME = 2_000_000  # her deneme artik ucuz (O(1) indeks) - asil sinir zaman butcesi
         for _dis_tur in range(15):
             if _zaman_doldu() or _deneme_sayaci > _MAKS_DENEME:
                 break
@@ -1290,51 +1290,89 @@ def _dagit_tek_deneme(veri):
             for tc in pencereli:
                 if _zaman_doldu() or _deneme_sayaci > _MAKS_DENEME:
                     break
-                once_pencere = ogrt_haftalik_pencere(tc)
-                bos_hucreler = []
-                for gun, saatler_o_gun_ham in ogrt_gun_index.get(tc, {}).items():
-                    saatler_o_gun = sorted(set(saatler_o_gun_ham))
-                    if len(saatler_o_gun) < 2:
-                        continue
-                    for s in range(min(saatler_o_gun), max(saatler_o_gun) + 1):
-                        if s not in saatler_o_gun:
-                            bos_hucreler.append((gun, s))
-                if not bos_hucreler:
-                    continue
-                tc_tasklari = tc_gorev_index.get(tc, [])
-                basarili_oldu = False
-                for bos_gun, bos_saat in bos_hucreler:
-                    if basarili_oldu or _zaman_doldu() or _deneme_sayaci > _MAKS_DENEME:
+                # ONEMLI: Bir ogretmen icin sadece TEK bir basarili takas
+                # bulununca durmuyoruz - AYNI PASS icinde bu ogretmenin
+                # MUMKUN OLDUGUNCA COK bosluguna takas denenir (bos
+                # hucreler her basarili takastan sonra YENIDEN hesaplanir).
+                # Bu, 'derinlik yetersiz - belirli bir yere kadar
+                # yapiyor gerisi yok' sikayetine dogrudan cevaptir: tek
+                # bir yuzeysel takas yerine, ayni ogretmen icin ZINCIRLEME
+                # (ama HER ADIM BAGIMSIZ VE GUVENLI dogrulanmis) coklu
+                # iyilestirme dener - ozyinelemeli/riskli derin kovma
+                # olmadan.
+                for _ic_deneme in range(8):
+                    if _zaman_doldu() or _deneme_sayaci > _MAKS_DENEME:
                         break
-                    # Indeksten O(1) bak - o saati isgal eden gorev(ler)i
-                    # DOGRUDAN bul, 874 gorevi TARAMA.
-                    adaylar = zaman_index.get((bos_gun, bos_saat), [])
-                    for g2_id in adaylar:
+                    once_pencere = ogrt_haftalik_pencere(tc)
+                    if once_pencere <= MAX_PENCERE_HEDEF:
+                        break  # bu ogretmen icin hedefe zaten ulasildi
+                    bos_hucreler = []
+                    for gun, saatler_o_gun_ham in ogrt_gun_index.get(tc, {}).items():
+                        saatler_o_gun = sorted(set(saatler_o_gun_ham))
+                        if len(saatler_o_gun) < 2:
+                            continue
+                        for s in range(min(saatler_o_gun), max(saatler_o_gun) + 1):
+                            if s not in saatler_o_gun:
+                                bos_hucreler.append((gun, s))
+                    if not bos_hucreler:
+                        break
+                    tc_tasklari = tc_gorev_index.get(tc, [])
+                    basarili_oldu = False
+                    for bos_gun, bos_saat in bos_hucreler:
                         if basarili_oldu or _zaman_doldu() or _deneme_sayaci > _MAKS_DENEME:
                             break
-                        g2 = gid_map[g2_id]
-                        if tc in tum_ogrt(g2):
-                            continue  # zaten tc'nin kendi dersi - atla
-                        for g1 in tc_tasklari:
-                            if g1["boy"] != g2["boy"]:
-                                continue
-                            _deneme_sayaci += 1
-                            nokta = kontrol_noktasi()
-                            if _zaman_takasi_uygula(g1["id"], g2["id"]):
-                                yeni_pencere = ogrt_haftalik_pencere(tc)
-                                if yeni_pencere < once_pencere:
-                                    herhangi_degisti = True
-                                    basarili_oldu = True
-                                    break
-                                else:
-                                    geri_al(nokta)  # iyilesme yok - direkt kontrol noktasindan geri don
-                            if basarili_oldu:
-
+                        adaylar = zaman_index.get((bos_gun, bos_saat), [])
+                        for g2_id in adaylar:
+                            if basarili_oldu or _zaman_doldu() or _deneme_sayaci > _MAKS_DENEME:
                                 break
-                        if basarili_oldu:
-                            break
-            if not herhangi_degisti:
-                break
+                            g2 = gid_map[g2_id]
+                            if tc in tum_ogrt(g2):
+                                continue  # zaten tc'nin kendi dersi - atla
+                            # GLOBAL KONTROL: takas ortaginin (g2'nin
+                            # ogretmen(ler)i) penceresi bu takastan sonra
+                            # KOTULESMEMELI - aksi halde sadece sorunu bir
+                            # ogretmenden digerine TASIMIS oluruz, gercek
+                            # bir iyilesme saglamayiz. Takastan ONCE bu
+                            # ogretmen(ler)in mevcut pencere degerini
+                            # kaydediyoruz, SONRA karsilastiracagiz.
+                            digerleri = [t for t in tum_ogrt(g2) if t != tc]
+                            once_digerleri = {t: ogrt_haftalik_pencere(t) for t in digerleri}
+                            for g1 in tc_tasklari:
+                                if g1["boy"] != g2["boy"]:
+                                    continue
+                                _deneme_sayaci += 1
+                                nokta = kontrol_noktasi()
+                                if _zaman_takasi_uygula(g1["id"], g2["id"]):
+                                    yeni_pencere = ogrt_haftalik_pencere(tc)
+                                    # BASKA HICBIR OGRETMENIN penceresi
+                                    # ARTMAMIS olmali (esitlik/iyilesme
+                                    # kabul edilir, kotulesme ASLA kabul
+                                    # edilmez).
+                                    kotulesen_var = any(
+                                        ogrt_haftalik_pencere(t) > once_digerleri[t] for t in digerleri)
+                                    if yeni_pencere < once_pencere and not kotulesen_var:
+                                        herhangi_degisti = True
+                                        basarili_oldu = True
+                                        break
+                                    else:
+                                        geri_al(nokta)
+                                if basarili_oldu:
+                                    break
+                            if basarili_oldu:
+                                break
+                    if not basarili_oldu:
+                        break  # bu ogretmen icin bu turda daha fazla iyilestirme bulunamadi
+                    # tc_gorev_index/ogrt_gun_index'i bu ogretmen icin
+                    # yeniden kur (takas sonrasi degisti) - digerlerine
+                    # dokunmadan sadece BU ogretmenin ve etkilenen g2'nin
+                    # kayitlarini tazele.
+                    ogrt_gun_index[tc] = {}
+                    tc_gorev_index[tc] = []
+                    for g in gorevler:
+                        if g["placed"] and tc in tum_ogrt(g):
+                            gp, sp = g["placed"]
+                            ogrt_gun_index[tc].setdefault(gp, []).extend(range(sp, sp + g["boy"]))
+                            tc_gorev_index[tc].append(g)
 
     zaman_takasi_pencere_pass()
 

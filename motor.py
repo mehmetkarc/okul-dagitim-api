@@ -1248,11 +1248,17 @@ def _dagit_tek_deneme(veri):
         yaptigina cok daha yakin bir arama gucu saglar.
 
         PERFORMANS: (gun,saat)->gid indeksi _dis_tur basina BIR KEZ
-        kurulur (874 gorevi HER bos hucre icin tek tek taramak yerine) -
-        onceki surum bunu yapmiyordu ve COK YAVAS calisiyordu (pratikte
-        donmus gibi gorunuyordu)."""
+        kurulur (874 gorevi HER bos hucre icin tek tek taramak yerine).
+
+        GUVENLIK: zaman kontrolune (_zaman_doldu) EK OLARAK mutlak bir
+        DENEME SAYACI (_deneme_sayaci) da var - zamanlama kontrolu
+        herhangi bir nedenle beklendigi gibi calismasa BILE, toplam
+        deneme sayisi bir ust siniri asinca pass KESIN olarak durur.
+        Bu, 'donma' riskini SIFIRA indirmek icin cift guvenlik katmanidir."""
+        _deneme_sayaci = 0
+        _MAKS_DENEME = 20000
         for _dis_tur in range(15):
-            if _zaman_doldu():
+            if _zaman_doldu() or _deneme_sayaci > _MAKS_DENEME:
                 break
             pencereli = sorted(
                 (tc for tc in tum_tc if not idareci_mi[tc] and ogrt_haftalik_pencere(tc) > MAX_PENCERE_HEDEF),
@@ -1264,23 +1270,30 @@ def _dagit_tek_deneme(veri):
             # saat bloklarin HER saati icin ayri kayit). Bu, "bu saatte ne
             # var" sorgusunu O(874)'ten O(1)'e indirir.
             zaman_index = {}
+            # Indeks: tc -> {gun: [saatler]} - bos_hucreler hesaplamasi
+            # ARTIK HER problemli ogretmen icin 874 gorevi taramiyor,
+            # bunun yerine bu indeksten O(1) okuyor.
+            ogrt_gun_index = {}
+            tc_gorev_index = {}
             for g in gorevler:
                 if not g["placed"]:
                     continue
                 gp, sp = g["placed"]
                 for b in range(g["boy"]):
                     zaman_index.setdefault((gp, sp + b), []).append(g["id"])
+                for otc in tum_ogrt(g):
+                    d = ogrt_gun_index.setdefault(otc, {}).setdefault(gp, [])
+                    d.extend(range(sp, sp + g["boy"]))
+                    tc_gorev_index.setdefault(otc, []).append(g)
 
             herhangi_degisti = False
             for tc in pencereli:
-                if _zaman_doldu():
+                if _zaman_doldu() or _deneme_sayaci > _MAKS_DENEME:
                     break
                 once_pencere = ogrt_haftalik_pencere(tc)
                 bos_hucreler = []
-                for gun in gunler:
-                    saatler_o_gun = sorted(s for g in gorevler if tc in tum_ogrt(g) and g["placed"]
-                                            and g["placed"][0] == gun
-                                            for s in range(g["placed"][1], g["placed"][1] + g["boy"]))
+                for gun, saatler_o_gun_ham in ogrt_gun_index.get(tc, {}).items():
+                    saatler_o_gun = sorted(set(saatler_o_gun_ham))
                     if len(saatler_o_gun) < 2:
                         continue
                     for s in range(min(saatler_o_gun), max(saatler_o_gun) + 1):
@@ -1288,21 +1301,24 @@ def _dagit_tek_deneme(veri):
                             bos_hucreler.append((gun, s))
                 if not bos_hucreler:
                     continue
-                tc_tasklari = [g for g in gorevler if tc in tum_ogrt(g) and g["placed"]]
+                tc_tasklari = tc_gorev_index.get(tc, [])
                 basarili_oldu = False
                 for bos_gun, bos_saat in bos_hucreler:
-                    if basarili_oldu or _zaman_doldu():
+                    if basarili_oldu or _zaman_doldu() or _deneme_sayaci > _MAKS_DENEME:
                         break
                     # Indeksten O(1) bak - o saati isgal eden gorev(ler)i
                     # DOGRUDAN bul, 874 gorevi TARAMA.
                     adaylar = zaman_index.get((bos_gun, bos_saat), [])
                     for g2_id in adaylar:
+                        if basarili_oldu or _zaman_doldu() or _deneme_sayaci > _MAKS_DENEME:
+                            break
                         g2 = gid_map[g2_id]
                         if tc in tum_ogrt(g2):
                             continue  # zaten tc'nin kendi dersi - atla
                         for g1 in tc_tasklari:
                             if g1["boy"] != g2["boy"]:
                                 continue
+                            _deneme_sayaci += 1
                             nokta = kontrol_noktasi()
                             if _zaman_takasi_uygula(g1["id"], g2["id"]):
                                 yeni_pencere = ogrt_haftalik_pencere(tc)
@@ -1313,6 +1329,7 @@ def _dagit_tek_deneme(veri):
                                 else:
                                     geri_al(nokta)  # iyilesme yok - direkt kontrol noktasindan geri don
                             if basarili_oldu:
+
                                 break
                         if basarili_oldu:
                             break

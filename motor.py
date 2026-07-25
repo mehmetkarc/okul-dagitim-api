@@ -1257,6 +1257,27 @@ def _dagit_tek_deneme(veri):
         Bu, 'donma' riskini SIFIRA indirmek icin cift guvenlik katmanidir."""
         _deneme_sayaci = 0
         _MAKS_DENEME = 2_000_000  # her deneme artik ucuz (O(1) indeks) - asil sinir zaman butcesi
+        _basarili_takas_sayisi = 0
+        _dis_tur_sayisi = 0
+        _baslangic_pencere_fazla = sum(
+            1 for tc in tum_tc if not idareci_mi[tc] and ogrt_haftalik_pencere(tc) > MAX_PENCERE_HEDEF)
+
+        # KRITIK DUZELTME: loglar gosterdi ki bu gecise SIK SIK "deneme=0"
+        # ile HIC zaman kalmiyordu - ONCEKI gecisler (yerlestirme, bos-gun,
+        # brans-takas vb.) toplam butceyi (_deneme_butcesi) TAMAMEN
+        # tuketiyordu, bu gecis ise pipeline'in EN SONUNDA oldugu icin
+        # HICBIR SEY deneyemeden cikiyordu. Artik bu gecise GARANTILI BIR
+        # MINIMUM SURE taniniyor - genel butce dolmus olsa BILE, bu pass
+        # en az bir miktar (kucuk, guvenli, mutlak bir tavanla sinirli)
+        # sure boyunca calisir.
+        _zt_baslangic = time.time()
+        _zt_garanti_sn = min(20, max(_deneme_butcesi * 0.35, 6))  # en az ~6sn, en fazla 20sn garanti
+
+        def _zt_zaman_doldu():
+            gecen_zt = time.time() - _zt_baslangic
+            if gecen_zt < _zt_garanti_sn:
+                return False  # garanti sure dolmadi - genel butce dolmus olsa bile devam et
+            return _zaman_doldu() or gecen_zt > 45  # garanti sonrasi normal kontrol + mutlak tavan (45sn)
 
         def _pencere_hizli(tc, gun_index):
             """ogrt_haftalik_pencere ile AYNI sonucu verir ama 874 gorevi
@@ -1274,7 +1295,8 @@ def _dagit_tek_deneme(veri):
             return toplam
 
         for _dis_tur in range(15):
-            if _zaman_doldu() or _deneme_sayaci > _MAKS_DENEME:
+            _dis_tur_sayisi += 1
+            if _zt_zaman_doldu() or _deneme_sayaci > _MAKS_DENEME:
                 break
 
             # Indeks: (gun,saat) -> o saati kaplayan gorev id'leri (coklu-
@@ -1305,7 +1327,7 @@ def _dagit_tek_deneme(veri):
 
             herhangi_degisti = False
             for tc in pencereli:
-                if _zaman_doldu() or _deneme_sayaci > _MAKS_DENEME:
+                if _zt_zaman_doldu() or _deneme_sayaci > _MAKS_DENEME:
                     break
                 # ONEMLI: Bir ogretmen icin sadece TEK bir basarili takas
                 # bulununca durmuyoruz - AYNI PASS icinde bu ogretmenin
@@ -1318,7 +1340,7 @@ def _dagit_tek_deneme(veri):
                 # iyilestirme dener - ozyinelemeli/riskli derin kovma
                 # olmadan.
                 for _ic_deneme in range(8):
-                    if _zaman_doldu() or _deneme_sayaci > _MAKS_DENEME:
+                    if _zt_zaman_doldu() or _deneme_sayaci > _MAKS_DENEME:
                         break
                     once_pencere = _pencere_hizli(tc, ogrt_gun_index)
                     if once_pencere <= MAX_PENCERE_HEDEF:
@@ -1336,11 +1358,11 @@ def _dagit_tek_deneme(veri):
                     tc_tasklari = tc_gorev_index.get(tc, [])
                     basarili_oldu = False
                     for bos_gun, bos_saat in bos_hucreler:
-                        if basarili_oldu or _zaman_doldu() or _deneme_sayaci > _MAKS_DENEME:
+                        if basarili_oldu or _zt_zaman_doldu() or _deneme_sayaci > _MAKS_DENEME:
                             break
                         adaylar = zaman_index.get((bos_gun, bos_saat), [])
                         for g2_id in adaylar:
-                            if basarili_oldu or _zaman_doldu() or _deneme_sayaci > _MAKS_DENEME:
+                            if basarili_oldu or _zt_zaman_doldu() or _deneme_sayaci > _MAKS_DENEME:
                                 break
                             g2 = gid_map[g2_id]
                             if tc in tum_ogrt(g2):
@@ -1391,6 +1413,7 @@ def _dagit_tek_deneme(veri):
                                     if yeni_pencere < once_pencere and not kotulesen_var:
                                         herhangi_degisti = True
                                         basarili_oldu = True
+                                        _basarili_takas_sayisi += 1
                                         # KABUL EDILDI - ogrt_gun_index'i
                                         # SADECE simdi, kalici olarak
                                         # guncelle (ayni ucuz yontemle).
@@ -1411,6 +1434,12 @@ def _dagit_tek_deneme(veri):
                                 break
                     if not basarili_oldu:
                         break  # bu ogretmen icin bu turda daha fazla iyilestirme bulunamadi
+
+        _bitis_pencere_fazla = sum(
+            1 for tc in tum_tc if not idareci_mi[tc] and ogrt_haftalik_pencere(tc) > MAX_PENCERE_HEDEF)
+        print(f"[ZAMAN TAKASI] dis_tur={_dis_tur_sayisi}/15 deneme={_deneme_sayaci} "
+              f"basarili_takas={_basarili_takas_sayisi} pencere_fazla: {_baslangic_pencere_fazla} -> "
+              f"{_bitis_pencere_fazla} sure_kullanilan={round(time.time()-t0,1)}s/{_deneme_butcesi}s", flush=True)
 
     zaman_takasi_pencere_pass()
 

@@ -347,6 +347,51 @@ def _dagit_tek_deneme(veri):
     # cozum uzerinde SUREKLI iyilestirme yapmasini saglar - ASC/FET
     # mantigina çok daha yakin.
     baslangic_yerlesim = veri.get("baslangic_yerlesim")
+    # ALTERNATIF GIRIS: eger frontend (sayfa yenilenmis, tarayici
+    # bellegindeki _yerlesim_ham kaybolmus olabilir) bunun yerine HAM
+    # 'baslangic_slots' (Supabase'den yuklenen, halihazirda ekranda
+    # gosterilen MEVCUT program - {sid:{gun:{saat:{ders_id,ogretmen_tc,...}}}})
+    # gonderirse, bunu OTOMATIK OLARAK baslangic_yerlesim formatina
+    # ceviririz. Bu, "kaldigi yerden devam"in sayfa yenilemeden SONRA
+    # bile calismasini saglar - cunku mevcut program zaten sunucuda/
+    # Supabase'de kayitlidir, sadece tarayici degiskeni kaybolmustur.
+    if not baslangic_yerlesim and veri.get("baslangic_slots"):
+        baslangic_slots = veri["baslangic_slots"]
+        uretilen_yerlesim = {}
+        gorev_gruplari = {}
+        for g in gorevler:
+            gorev_gruplari.setdefault((g["sid"], g["did"]), []).append(g)
+        for (sid, did), grup in gorev_gruplari.items():
+            grup.sort(key=lambda g: g["id"])  # bi sirasina gore (id icinde kodlu)
+            hucreler = baslangic_slots.get(sid, {})
+            bloklar = []  # [(gun, baslangic_saat, uzunluk, tc, ogrtler)]
+            for gun_str, saatler in hucreler.items():
+                gun_i = int(gun_str)
+                saat_listesi = sorted(int(s) for s, h in saatler.items()
+                                       if str(h.get("ders_id")) == str(did))
+                # ardisik saatleri gruplayarak bloklara ayir
+                i = 0
+                while i < len(saat_listesi):
+                    j = i
+                    while j + 1 < len(saat_listesi) and saat_listesi[j + 1] == saat_listesi[j] + 1:
+                        j += 1
+                    baslangic_saat = saat_listesi[i]
+                    uzunluk = saat_listesi[j] - saat_listesi[i] + 1
+                    hucre = saatler[str(baslangic_saat)]
+                    bloklar.append((gun_i, baslangic_saat, uzunluk,
+                                     hucre.get("ogretmen_tc"), hucre.get("ogretmenler", [])))
+                    i = j + 1
+            bloklar.sort(key=lambda b: (b[0], b[1]))
+            # Sadece blok SAYISI ve UZUNLUKLARI tam eslesirse uygula -
+            # eslesmezse (eksik/farkli veri) bu (sid,did) grubunu ATLA,
+            # o gorevler NORMAL yerlestirme ile islenir (guvenli fallback).
+            if len(bloklar) == len(grup) and all(
+                    bloklar[i][2] == grup[i]["boy"] for i in range(len(grup))):
+                for g, (gun_i, baslangic_saat, uzunluk, tc_b, ogrtler_b) in zip(grup, bloklar):
+                    uretilen_yerlesim[g["id"]] = [gun_i, baslangic_saat, tc_b, ogrtler_b]
+        baslangic_yerlesim = uretilen_yerlesim
+        print(f"[BASLANGIC_SLOTS] {len(uretilen_yerlesim)}/{len(gorevler)} gorev "
+              f"mevcut programdan basariyla eslesti", flush=True)
     onceden_yerlesen_gid = set()
     if baslangic_yerlesim:
         gid_map_erken = {g["id"]: g for g in gorevler}

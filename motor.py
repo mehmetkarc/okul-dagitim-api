@@ -1453,9 +1453,42 @@ def _dagit_tek_deneme(veri):
                                         return toplam
 
                                     yeni_pencere = _pencere_canli(tc)
+                                    digerleri_sonra = {t: _pencere_canli(t) for t in digerleri}
                                     kotulesen_var = any(
-                                        _pencere_canli(t) > once_digerleri[t] for t in digerleri)
-                                    if yeni_pencere < once_pencere and not kotulesen_var:
+                                        digerleri_sonra[t] > once_digerleri[t] for t in digerleri)
+                                    # GERCEK SIMULATED ANNEALING KABUL KRITERI:
+                                    # eskiden SADECE 'hedef ogretmen kesin
+                                    # iyilessin VE kimse kotulesmesin' kabul
+                                    # ediliyordu - bu COK KATI bir kural, ve
+                                    # 20+ saatlik gercek testler gosterdi ki
+                                    # bu, aramanin bir YEREL CUKURDA
+                                    # TAKILMASINA yol aciyor (ASC/FET'in
+                                    # simulated annealing ile kacindigi tam
+                                    # olarak bu). Artik TOPLAM etki (hedef +
+                                    # TUM etkilenenler) degerlendiriliyor:
+                                    #  - TOPLAM azaliyorsa: HER ZAMAN kabul
+                                    #    (bazi bireyler kotulesse bile, NET
+                                    #    iyilesme varsa kabul edilir - bu,
+                                    #    eskisinden DAHA GUCLU bir kabul).
+                                    #  - TOPLAM AYNI kalıyorsa (yanal hamle):
+                                    #    sicakliga bagli bir olasilikla kabul
+                                    #    edilir - bu, aramanin farkli
+                                    #    konfigurasyonlari 'dolasarak' daha
+                                    #    sonra gercek bir iyilesme bulmasini
+                                    #    saglar (SA'nin temel mantigi).
+                                    #  - TOPLAM ARTIYORSA: ASLA kabul edilmez
+                                    #    (net kotulesme kesinlikle onlenir).
+                                    toplam_once = once_pencere + sum(once_digerleri.values())
+                                    toplam_sonra = yeni_pencere + sum(digerleri_sonra.values())
+                                    # Sicaklik: _dis_tur ilerledikce (0->14) azalir,
+                                    # yanal hamle kabul olasiligi da azalir.
+                                    sicaklik = max(0.05, 0.35 * (1 - _dis_tur / 15))
+                                    kabul_edildi = False
+                                    if toplam_sonra < toplam_once:
+                                        kabul_edildi = True  # NET iyilesme - her zaman kabul
+                                    elif toplam_sonra == toplam_once and random.random() < sicaklik:
+                                        kabul_edildi = True  # yanal hamle - sicakliga bagli kesif
+                                    if kabul_edildi:
                                         herhangi_degisti = True
                                         basarili_oldu = True
                                         _basarili_takas_sayisi += 1

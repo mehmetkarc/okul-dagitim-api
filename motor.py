@@ -1591,7 +1591,20 @@ def _dagit_tek_deneme(veri):
                                         _zincir = [g1["id"], g2["id"]]
                                         _zincir_son_ogrt = g2["tc"]
                                         _kullanilan_idler = {g1["id"], g2["id"]}
-                                        MAX_ZINCIR = 8
+                                        # Zincir uzunlugu sinirini YUKSEK
+                                        # tuttuk (kullanicinin istegi
+                                        # uzerine) - GUVENLIK zaten HER
+                                        # ADIMDA _zt_zaman_doldu() ve
+                                        # _deneme_sayaci kontrolleriyle
+                                        # saglaniyor, bu yuzden zincir
+                                        # gerekirse (ve zaman/deneme
+                                        # butcesi izin verdigi surece)
+                                        # onlarca/yuzlerce ogretmene kadar
+                                        # uzayabilir - MAX_ZINCIR sadece
+                                        # bir ANLAMSIZ SONSUZ DONGUYE
+                                        # (herkes tukenip aday kalmayana
+                                        # kadar) karsi son bir guvenlik agi.
+                                        MAX_ZINCIR = min(100, len(tum_tc))
                                         while len(_zincir) < MAX_ZINCIR and not basarili_oldu:
                                             if _zt_zaman_doldu() or _deneme_sayaci > _MAKS_DENEME:
                                                 break

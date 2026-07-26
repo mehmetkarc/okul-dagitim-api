@@ -36,7 +36,7 @@ Cikti CP-SAT versiyonuyla AYNI:
 import time
 import random
 
-MOTOR_VERSIYON = "6.0.0-garantili-sure-zaman-takasi"  # /saglik uzerinden dogrulanir
+MOTOR_VERSIYON = "7.0.0-n-li-zincir-brans-takas-duzeltmesi"  # /saglik uzerinden dogrulanir
 
 
 def _dagit_tek_deneme(veri):

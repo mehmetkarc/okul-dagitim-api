@@ -1203,6 +1203,44 @@ def _dagit_tek_deneme(veri):
                 break
         return degisti_toplam
 
+    def _zaman_zincir_uygula(gid_listesi):
+        """GENEL N'Lİ DONGUSEL zaman rotasyonu: gid_listesi'ndeki HER
+        gorev, LISTEDEKI BIR SONRAKI gorevin eski yerine tasinir (son
+        gorev, ILK gorevin eski yerine doner). Uzunluk 2 ise bu
+        _zaman_takasi_uygula ile AYNI seydir, 3 ise _zaman_rotasyon_uygula
+        ile ayni. Ama BURADA uzunluk 4, 5, 6, 7... herhangi bir sayi
+        olabilir - kullanicinin istegi uzerine: 'ikili takas yetmezse uc,
+        dort, bes, alti, yedi, gerekirse TUM dersler surekli degisebilir'.
+        Zincir ne kadar uzunsa, hepsinin AYNI ANDA uygun olmasi gerektigi
+        icin basari ihtimali dusuk olur - ama BULUNDUGUNDA cok daha
+        guclu/esnek bir cozum sunar."""
+        gorevler_n = [gid_map[gid] for gid in gid_listesi]
+        if any(not g["placed"] for g in gorevler_n):
+            return False
+        boy0 = gorevler_n[0]["boy"]
+        if any(g["boy"] != boy0 for g in gorevler_n):
+            return False
+        konumlar = [g["placed"] for g in gorevler_n]
+        if len(set(konumlar)) < len(konumlar):
+            return False  # tum konumlar birbirinden farkli olmali
+        once_ihlal = ihlal_sayisi()
+        once_fazla = fazla_bos_gun_toplam()
+        nokta = kontrol_noktasi()
+        for gid in gid_listesi:
+            bosalt(gid)
+        n = len(gid_listesi)
+        hepsi_uygun = all(
+            musait_mi(gid_listesi[i], *konumlar[(i + 1) % n]) for i in range(n))
+        if hepsi_uygun:
+            for i in range(n):
+                yerlestir(gid_listesi[i], *konumlar[(i + 1) % n])
+            if ihlal_sayisi() > once_ihlal or fazla_bos_gun_toplam() > once_fazla:
+                geri_al(nokta)
+                return False
+            return True
+        geri_al(nokta)
+        return False
+
     def gunler_arasi_bosluk_doldur(tc):
         """Bir gunun ic bosluguna, tc'nin BASKA bir gundeki bir dersini tasimayi
         dener. Once dogrudan bos hucre arar; sinif dolu oldugu icin bos hucre
@@ -1539,32 +1577,49 @@ def _dagit_tek_deneme(veri):
                                         break
                                     else:
                                         geri_al(nokta)
-                                        # IKILI TAKAS YETERSIZ KALDI - 3'LU
-                                        # ROTASYON dene (kullanicinin istegi
-                                        # uzerine: 'dikey/capraz' hareketler).
-                                        # g2'nin ogretmeninin BASKA bir
-                                        # dersini ucuncu nokta olarak
-                                        # kullanarak dongusel bir rotasyon
-                                        # deneriz - bazen A<->B ikili takas
-                                        # islemez ama A->B->C->A rotasyonu
-                                        # herkes icin uygun olabilir.
-                                        for g3_aday in tc_gorev_index.get(g2["tc"], []):
-                                            if g3_aday["id"] in (g1["id"], g2["id"]):
-                                                continue
-                                            if g3_aday["boy"] != g1["boy"] or not g3_aday["placed"]:
-                                                continue
+                                        # IKILI TAKAS YETERSIZ KALDI - kullanicinin
+                                        # istegi uzerine ZINCIRI 3, 4, 5, 6, 7, 8
+                                        # UZUNLUGUNA KADAR genisleterek dene.
+                                        # Her adimda zincirin SON eklenen
+                                        # ogretmeninin BASKA bir dersini
+                                        # bulup zincire ekleriz - bu, A->B
+                                        # ikili takasin cozemedigi, ama
+                                        # A->B->C->...->A gibi uzun bir
+                                        # dongunun cozebilecegi durumlari
+                                        # yakalar (ASC/FET'in de kullandigi
+                                        # 'zincirleme takas' mantigi).
+                                        _zincir = [g1["id"], g2["id"]]
+                                        _zincir_son_ogrt = g2["tc"]
+                                        _kullanilan_idler = {g1["id"], g2["id"]}
+                                        MAX_ZINCIR = 8
+                                        while len(_zincir) < MAX_ZINCIR and not basarili_oldu:
+                                            if _zt_zaman_doldu() or _deneme_sayaci > _MAKS_DENEME:
+                                                break
+                                            aday_bulundu = False
+                                            for g_yeni in tc_gorev_index.get(_zincir_son_ogrt, []):
+                                                if g_yeni["id"] in _kullanilan_idler:
+                                                    continue
+                                                if g_yeni["boy"] != g1["boy"] or not g_yeni["placed"]:
+                                                    continue
+                                                _zincir.append(g_yeni["id"])
+                                                _kullanilan_idler.add(g_yeni["id"])
+                                                _zincir_son_ogrt = g_yeni["tc"]
+                                                aday_bulundu = True
+                                                break
+                                            if not aday_bulundu:
+                                                break  # zincir uzatilamiyor - daha fazla aday yok
                                             _deneme_sayaci += 1
-                                            nokta2 = kontrol_noktasi()
-                                            if _zaman_rotasyon_uygula(g1["id"], g2["id"], g3_aday["id"]):
-                                                yeni_pencere_r = _pencere_canli(tc)
-                                                digerleri_sonra_r = {t: _pencere_canli(t) for t in digerleri}
-                                                toplam_sonra_r = yeni_pencere_r + sum(digerleri_sonra_r.values())
-                                                kabul_r = False
-                                                if toplam_sonra_r < toplam_once:
-                                                    kabul_r = True
-                                                elif toplam_sonra_r == toplam_once and random.random() < sicaklik:
-                                                    kabul_r = True
-                                                if kabul_r:
+                                            nokta3 = kontrol_noktasi()
+                                            if _zaman_zincir_uygula(_zincir):
+                                                yeni_pencere_z = _pencere_canli(tc)
+                                                digerleri_sonra_z = {t: _pencere_canli(t) for t in digerleri}
+                                                toplam_sonra_z = yeni_pencere_z + sum(digerleri_sonra_z.values())
+                                                kabul_z = False
+                                                if toplam_sonra_z < toplam_once:
+                                                    kabul_z = True
+                                                elif toplam_sonra_z == toplam_once and random.random() < sicaklik:
+                                                    kabul_z = True
+                                                if kabul_z:
                                                     herhangi_degisti = True
                                                     basarili_oldu = True
                                                     _basarili_takas_sayisi += 1
@@ -1576,9 +1631,8 @@ def _dagit_tek_deneme(veri):
                                                                 yeni_gun_saat.setdefault(gp2, []).extend(
                                                                     range(sp2, sp2 + g["boy"]))
                                                         ogrt_gun_index[etkilenen] = yeni_gun_saat
-                                                    break
                                                 else:
-                                                    geri_al(nokta2)
+                                                    geri_al(nokta3)
                                         if basarili_oldu:
                                             break
                                 if basarili_oldu:
@@ -1620,6 +1674,7 @@ def _dagit_tek_deneme(veri):
         brans1 = tc_kisit[tc1]["brans"]
         if not brans1:
             return False
+        once_pencere_tc1 = ogrt_haftalik_pencere(tc1)
         for gun in gunler:
             saatler = ogrt_gun_saatleri(tc1, gun)
             if len(saatler) < 2:
@@ -1644,8 +1699,26 @@ def _dagit_tek_deneme(veri):
                     for g1 in gorevler:
                         if (g1["placed"] and tc1 in tum_ogrt(g1) and tc2 not in tum_ogrt(g1)
                                 and g1["boy"] == boy2 and g1["placed"][0] != gun):
+                            # PENCERE-FARKINDA GUVENLIK KONTROLU: takas
+                            # oncesi tc2'nin de pencere degerini kaydet -
+                            # ONCEDEN bu kontrol YOKTU, bu yuzden bu pass
+                            # zaman_takasi_pencere_pass'in dikkatlice
+                              # bulmus oldugu iyilesmeleri SESSIZCE
+                            # bozabiliyordu (ilk uygun takasi kosulsuz
+                            # kabul ediyordu).
+                            once_pencere_tc2 = ogrt_haftalik_pencere(tc2)
                             if _takasi_uygula(g1["id"], g2["id"]):
-                                return True
+                                yeni_pencere_tc1 = ogrt_haftalik_pencere(tc1)
+                                yeni_pencere_tc2 = ogrt_haftalik_pencere(tc2)
+                                if (yeni_pencere_tc1 < once_pencere_tc1
+                                        and yeni_pencere_tc2 <= once_pencere_tc2):
+                                    return True
+                                # Iyilesme yok VEYA tc2 kotulesti - GERI AL.
+                                # _takasi_uygula kendi ic transaction'ini
+                                # commit ettigi icin, tersini uygulayarak
+                                # (ayni iki gorevi tekrar takas ederek) geri
+                                # aliyoruz.
+                                _takasi_uygula(g1["id"], g2["id"])
         return False
 
     def brans_takas_pass():

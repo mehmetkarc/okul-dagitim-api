@@ -36,7 +36,7 @@ Cikti CP-SAT versiyonuyla AYNI:
 import time
 import random
 
-MOTOR_VERSIYON = "7.0.0-n-li-zincir-brans-takas-duzeltmesi"  # /saglik uzerinden dogrulanir
+MOTOR_VERSIYON = "7.1.0-derinlik-artirildi"  # /saglik uzerinden dogrulanir
 
 
 def _dagit_tek_deneme(veri):
@@ -1455,7 +1455,7 @@ def _dagit_tek_deneme(veri):
                 # (ama HER ADIM BAGIMSIZ VE GUVENLI dogrulanmis) coklu
                 # iyilestirme dener - ozyinelemeli/riskli derin kovma
                 # olmadan.
-                for _ic_deneme in range(8):
+                for _ic_deneme in range(30):
                     if _zt_zaman_doldu() or _deneme_sayaci > _MAKS_DENEME:
                         break
                     once_pencere = _pencere_hizli(tc, ogrt_gun_index)
@@ -1608,17 +1608,18 @@ def _dagit_tek_deneme(veri):
                                         while len(_zincir) < MAX_ZINCIR and not basarili_oldu:
                                             if _zt_zaman_doldu() or _deneme_sayaci > _MAKS_DENEME:
                                                 break
+                                            adaylar_z = [g_yeni for g_yeni in tc_gorev_index.get(_zincir_son_ogrt, [])
+                                                         if g_yeni["id"] not in _kullanilan_idler
+                                                         and g_yeni["boy"] == g1["boy"] and g_yeni["placed"]]
                                             aday_bulundu = False
-                                            for g_yeni in tc_gorev_index.get(_zincir_son_ogrt, []):
-                                                if g_yeni["id"] in _kullanilan_idler:
-                                                    continue
-                                                if g_yeni["boy"] != g1["boy"] or not g_yeni["placed"]:
-                                                    continue
+                                            if adaylar_z:
+                                                # RASTGELE sec (sadece ilk bulunani degil) - boylece
+                                                # farkli turlarda farkli zincir yapilari kesfedilir.
+                                                g_yeni = random.choice(adaylar_z)
                                                 _zincir.append(g_yeni["id"])
                                                 _kullanilan_idler.add(g_yeni["id"])
                                                 _zincir_son_ogrt = g_yeni["tc"]
                                                 aday_bulundu = True
-                                                break
                                             if not aday_bulundu:
                                                 break  # zincir uzatilamiyor - daha fazla aday yok
                                             _deneme_sayaci += 1

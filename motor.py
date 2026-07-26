@@ -972,6 +972,39 @@ def _dagit_tek_deneme(veri):
         geri_al(nokta)
         return False
 
+    def _zaman_rotasyon_uygula(gid1, gid2, gid3):
+        """3'LU DONGUSEL zaman rotasyonu: g1->g2'nin eski yeri, g2->g3'un
+        eski yeri, g3->g1'in eski yeri. Bazi durumlarda IKILI takas
+        (_zaman_takasi_uygula) tek basina cozum bulamaz - A dersi B'nin
+        yerini, B dersi C'nin yerini, C dersi A'nin yerini istiyor
+        olabilir (dongusel bagimlilik). Bu fonksiyon boyle 'ucgen'
+        durumlari cozer - ASC/FET'in de kullandigi 'zincirleme takas'
+        mantigina bir adim daha yaklasir."""
+        g1, g2, g3 = gid_map[gid1], gid_map[gid2], gid_map[gid3]
+        if not (g1["placed"] and g2["placed"] and g3["placed"]):
+            return False
+        if not (g1["boy"] == g2["boy"] == g3["boy"]):
+            return False
+        p1, p2, p3 = g1["placed"], g2["placed"], g3["placed"]
+        if len({p1, p2, p3}) < 3:
+            return False  # ucu de farkli konumda olmali, aksi halde anlamsiz
+        once_ihlal = ihlal_sayisi()
+        once_fazla = fazla_bos_gun_toplam()
+        nokta = kontrol_noktasi()
+        bosalt(gid1)
+        bosalt(gid2)
+        bosalt(gid3)
+        if musait_mi(gid1, *p2) and musait_mi(gid2, *p3) and musait_mi(gid3, *p1):
+            yerlestir(gid1, *p2)
+            yerlestir(gid2, *p3)
+            yerlestir(gid3, *p1)
+            if ihlal_sayisi() > once_ihlal or fazla_bos_gun_toplam() > once_fazla:
+                geri_al(nokta)
+                return False
+            return True
+        geri_al(nokta)
+        return False
+
 
     # ---------------- 9b. Fazla bos gunu BRANS TAKASIYLA doldurmayi zorla ----------------
     # fazla_bos_gun_konsolide_pass (dogrudan doldur/swap) bazi ogretmenler icin
@@ -1506,6 +1539,48 @@ def _dagit_tek_deneme(veri):
                                         break
                                     else:
                                         geri_al(nokta)
+                                        # IKILI TAKAS YETERSIZ KALDI - 3'LU
+                                        # ROTASYON dene (kullanicinin istegi
+                                        # uzerine: 'dikey/capraz' hareketler).
+                                        # g2'nin ogretmeninin BASKA bir
+                                        # dersini ucuncu nokta olarak
+                                        # kullanarak dongusel bir rotasyon
+                                        # deneriz - bazen A<->B ikili takas
+                                        # islemez ama A->B->C->A rotasyonu
+                                        # herkes icin uygun olabilir.
+                                        for g3_aday in tc_gorev_index.get(g2["tc"], []):
+                                            if g3_aday["id"] in (g1["id"], g2["id"]):
+                                                continue
+                                            if g3_aday["boy"] != g1["boy"] or not g3_aday["placed"]:
+                                                continue
+                                            _deneme_sayaci += 1
+                                            nokta2 = kontrol_noktasi()
+                                            if _zaman_rotasyon_uygula(g1["id"], g2["id"], g3_aday["id"]):
+                                                yeni_pencere_r = _pencere_canli(tc)
+                                                digerleri_sonra_r = {t: _pencere_canli(t) for t in digerleri}
+                                                toplam_sonra_r = yeni_pencere_r + sum(digerleri_sonra_r.values())
+                                                kabul_r = False
+                                                if toplam_sonra_r < toplam_once:
+                                                    kabul_r = True
+                                                elif toplam_sonra_r == toplam_once and random.random() < sicaklik:
+                                                    kabul_r = True
+                                                if kabul_r:
+                                                    herhangi_degisti = True
+                                                    basarili_oldu = True
+                                                    _basarili_takas_sayisi += 1
+                                                    for etkilenen in {tc} | set(digerleri):
+                                                        yeni_gun_saat = {}
+                                                        for g in tc_gorev_index.get(etkilenen, []):
+                                                            if g["placed"]:
+                                                                gp2, sp2 = g["placed"]
+                                                                yeni_gun_saat.setdefault(gp2, []).extend(
+                                                                    range(sp2, sp2 + g["boy"]))
+                                                        ogrt_gun_index[etkilenen] = yeni_gun_saat
+                                                    break
+                                                else:
+                                                    geri_al(nokta2)
+                                        if basarili_oldu:
+                                            break
                                 if basarili_oldu:
                                     break
                             if basarili_oldu:

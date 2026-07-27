@@ -36,7 +36,7 @@ Cikti CP-SAT versiyonuyla AYNI:
 import time
 import random
 
-MOTOR_VERSIYON = "7.1.0-derinlik-artirildi"  # /saglik uzerinden dogrulanir
+MOTOR_VERSIYON = "7.2.0-regresyon-dogrulandi-yok"  # /saglik uzerinden dogrulanir
 
 
 def _dagit_tek_deneme(veri):

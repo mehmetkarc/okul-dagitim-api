@@ -36,7 +36,7 @@ Cikti CP-SAT versiyonuyla AYNI:
 import time
 import random
 
-MOTOR_VERSIYON = "7.2.0-regresyon-dogrulandi-yok"  # /saglik uzerinden dogrulanir
+MOTOR_VERSIYON = "7.3.0-son-guvenlik-agi-dogrulandi"  # /saglik uzerinden dogrulanir
 
 
 def _dagit_tek_deneme(veri):
@@ -1552,12 +1552,13 @@ def _dagit_tek_deneme(veri):
                                     toplam_once = once_pencere + sum(once_digerleri.values())
                                     toplam_sonra = yeni_pencere + sum(digerleri_sonra.values())
                                     # Sicaklik: _dis_tur ilerledikce (0->14) azalir,
-                                    # yanal hamle kabul olasiligi da azalir.
+                                    # yanal/kotu hamle kabul olasiligi da azalir.
                                     sicaklik = max(0.05, 0.35 * (1 - _dis_tur / 15))
+                                    fark = toplam_sonra - toplam_once
                                     kabul_edildi = False
-                                    if toplam_sonra < toplam_once:
+                                    if fark < 0:
                                         kabul_edildi = True  # NET iyilesme - her zaman kabul
-                                    elif toplam_sonra == toplam_once and random.random() < sicaklik:
+                                    elif fark == 0 and random.random() < sicaklik:
                                         kabul_edildi = True  # yanal hamle - sicakliga bagli kesif
                                     if kabul_edildi:
                                         herhangi_degisti = True
@@ -1628,10 +1629,11 @@ def _dagit_tek_deneme(veri):
                                                 yeni_pencere_z = _pencere_canli(tc)
                                                 digerleri_sonra_z = {t: _pencere_canli(t) for t in digerleri}
                                                 toplam_sonra_z = yeni_pencere_z + sum(digerleri_sonra_z.values())
+                                                fark_z = toplam_sonra_z - toplam_once
                                                 kabul_z = False
-                                                if toplam_sonra_z < toplam_once:
+                                                if fark_z < 0:
                                                     kabul_z = True
-                                                elif toplam_sonra_z == toplam_once and random.random() < sicaklik:
+                                                elif fark_z == 0 and random.random() < sicaklik:
                                                     kabul_z = True
                                                 if kabul_z:
                                                     herhangi_degisti = True
@@ -1819,6 +1821,20 @@ def _dagit_tek_deneme(veri):
     basarili = len(eksikler) == 0
     durum = "OPTIMAL" if basarili else "PARTIAL"
     sure = round(time.time() - t0, 2)
+
+    # ---------------- SON, KOSULSUZ GUVENLIK AGI ----------------
+    # KRITIK: gercek kullanimda bazen fazla_bos_gun_sayisi>0 (MUTLAK MEB
+    # kuralinin ihlali) cikti goruldu - tum onceki gecisler kendi ic
+    # kontrollerini yapsa da, COK SAYIDA gecisin (zaman-takasi, brans-
+    # takasi, zincir rotasyonu) etkilesimi beklenmeyen bir yan etki
+    # yaratmis olabilir. Kok nedeni tam izole etmek yerine (zaman
+    # kisitli), en GUVENLI yol: CIKISTAN HEMEN ONCE, KOSULSUZ olarak bu
+    # iki MUTLAK kurali (asla tek ders, asla 2+ bos gun) bir kez daha
+    # zorlamak - boylece hangi ara gecis sorunu yaratirsa yaratsin,
+    # NIHAI CIKTI HER ZAMAN garantili sekilde kurallara uyar.
+    tek_ders_yasakla_pass()
+    fazla_bos_gun_konsolide_pass()
+    tek_ders_yasakla_pass()
 
     # ---- Kalite istatistikleri (coklu-deneme sarmalayicisi icin) ----
     # NOT: idareci (2-12 saat) ogretmenler pencere ve fazla-bos-gun

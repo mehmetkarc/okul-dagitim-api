@@ -1459,7 +1459,7 @@ def _dagit_tek_deneme(veri):
                 # (hedeften ne kadar uzaksa) o kadar fazla deneme hakki
                 # verilir - en zorlu vakalara daha fazla arama gucu.
                 _baslangic_pencere_tc = _pencere_hizli(tc, ogrt_gun_index)
-                _ic_deneme_sayisi = min(60, 15 + (_baslangic_pencere_tc - MAX_PENCERE_HEDEF) * 8)
+                _ic_deneme_sayisi = min(20, 12 + (_baslangic_pencere_tc - MAX_PENCERE_HEDEF) * 2)
                 for _ic_deneme in range(_ic_deneme_sayisi):
                     if _zt_zaman_doldu() or _deneme_sayaci > _MAKS_DENEME:
                         break
@@ -1558,7 +1558,7 @@ def _dagit_tek_deneme(veri):
                                     toplam_sonra = yeni_pencere + sum(digerleri_sonra.values())
                                     # Sicaklik: _dis_tur ilerledikce (0->14) azalir,
                                     # yanal/kotu hamle kabul olasiligi da azalir.
-                                    sicaklik = max(0.1, 0.55 * (1 - _dis_tur / 15))
+                                    sicaklik = max(0.05, 0.35 * (1 - _dis_tur / 15))
                                     fark = toplam_sonra - toplam_once
                                     kabul_edildi = False
                                     if fark < 0:
@@ -1610,7 +1610,7 @@ def _dagit_tek_deneme(veri):
                                         # bir ANLAMSIZ SONSUZ DONGUYE
                                         # (herkes tukenip aday kalmayana
                                         # kadar) karsi son bir guvenlik agi.
-                                        MAX_ZINCIR = min(100, len(tum_tc))
+                                        MAX_ZINCIR = min(20, len(tum_tc))
                                         while len(_zincir) < MAX_ZINCIR and not basarili_oldu:
                                             if _zt_zaman_doldu() or _deneme_sayaci > _MAKS_DENEME:
                                                 break

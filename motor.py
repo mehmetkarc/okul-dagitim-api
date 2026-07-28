@@ -36,7 +36,7 @@ Cikti CP-SAT versiyonuyla AYNI:
 import time
 import random
 
-MOTOR_VERSIYON = "7.3.0-son-guvenlik-agi-dogrulandi"  # /saglik uzerinden dogrulanir
+MOTOR_VERSIYON = "7.4.0-checkpoint-coklu-deneme"  # /saglik uzerinden dogrulanir
 
 
 def _dagit_tek_deneme(veri):
@@ -2000,12 +2000,33 @@ def arka_plan_arama(veri, sure_sn, ilerleme_fn=None, durdur_fn=None, tur_butcesi
     # uygulanan/bulunan duruma gore devam eder.
     hazir_baslangic = veri.get("baslangic_yerlesim")
     if hazir_baslangic:
-        ilk_veri = dict(veri)
-        ilk_veri["seed"] = taban_seed
-        ilk_veri["on_bos_gun_ata"] = False
-        ilk_veri["_deneme_butcesi_sn"] = min(45, sure_sn)
-        ilk_sonuc = _dagit_tek_deneme(ilk_veri)
-        if not ilk_sonuc.get("_butunluk_sorunu"):
+        # KRITIK DUZELTME: checkpoint'i yeniden islerken (guvenlik aglarini
+        # calistirmak icin) bazen GECICI olarak fazla_bos_gun/min_ihlal
+        # ihlali olusabiliyor (farkli mutlak kurallari duzeltme gecisleri
+        # birbirini etkileyebiliyor). Bunu en aza indirmek icin, FARKLI
+        # seed'lerle birkac deneme yapip EN TEMIZ (ihlal toplami en dusuk)
+        # olani baslangic noktasi olarak seciyoruz - boylece checkpoint'in
+        # kalitesi guvenilir sekilde korunur.
+        en_temiz_sonuc = None
+        en_temiz_ihlal_toplam = None
+        for _dene in range(3):
+            ilk_veri = dict(veri)
+            ilk_veri["seed"] = taban_seed + _dene * 104729
+            ilk_veri["on_bos_gun_ata"] = False
+            ilk_veri["_deneme_butcesi_sn"] = min(8, sure_sn)
+            aday = _dagit_tek_deneme(ilk_veri)
+            if aday.get("_butunluk_sorunu"):
+                continue
+            aday_ist = aday.get("istatistik", {})
+            ihlal_toplam = aday_ist.get("fazla_bos_gun_sayisi", 0) * 1000 + aday_ist.get("min_ihlal_sayisi", 0)
+            if en_temiz_ihlal_toplam is None or ihlal_toplam < en_temiz_ihlal_toplam:
+                en_temiz_sonuc = aday
+                en_temiz_ihlal_toplam = ihlal_toplam
+            if ihlal_toplam == 0:
+                break  # mukemmel temiz bulundu - daha fazla denemeye gerek yok
+        ilk_sonuc = en_temiz_sonuc
+        ilk_ist = ilk_sonuc.get("istatistik", {}) if ilk_sonuc else {}
+        if ilk_sonuc is not None and not ilk_sonuc.get("_butunluk_sorunu"):
             en_iyi_sonuc = ilk_sonuc
             en_iyi_skor = hesapla_skor(en_iyi_sonuc)
             en_iyi_sonuc["_tur_no"] = 0
@@ -2016,8 +2037,13 @@ def arka_plan_arama(veri, sure_sn, ilerleme_fn=None, durdur_fn=None, tur_butcesi
                 except Exception:
                     pass
             FAZ1_TUR_SAYISI = 0  # kesif atlanir - direkt cilalamaya gec
-            print("[KALDIGI YERDEN DEVAM] hazir baslangic yerlesimi yuklendi, "
-                  "Faz 1 (sifirdan kesif) atlaniyor", flush=True)
+            uyari = ""
+            if ilk_ist.get("fazla_bos_gun_sayisi", 0) > 0 or ilk_ist.get("min_ihlal_sayisi", 0) > 0:
+                uyari = (f" - UYARI: checkpoint fazla_bosgun={ilk_ist.get('fazla_bos_gun_sayisi')} "
+                         f"min_ihlal={ilk_ist.get('min_ihlal_sayisi')} icermis olabilir (3 denemenin "
+                         f"en temizi secildi), sonraki turlerde duzeltilmeye calisilacak")
+            print(f"[KALDIGI YERDEN DEVAM] hazir baslangic yerlesimi yuklendi, "
+                  f"Faz 1 (sifirdan kesif) atlaniyor{uyari}", flush=True)
 
     # 6-24 saatlik COK UZUN calismalar icin: cilalama bir SUREDIR
     # (TAKILMA_ESIGI tur boyunca) hic iyilesme saglamiyorsa, mevcut en

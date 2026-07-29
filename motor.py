@@ -36,7 +36,7 @@ Cikti CP-SAT versiyonuyla AYNI:
 import time
 import random
 
-MOTOR_VERSIYON = "7.5.0-checkpoint-pencere-korumasi"  # /saglik uzerinden dogrulanir
+MOTOR_VERSIYON = "7.6.0-checkpoint-daha-fazla-deneme"  # /saglik uzerinden dogrulanir
 
 
 def _dagit_tek_deneme(veri):
@@ -2009,11 +2009,11 @@ def arka_plan_arama(veri, sure_sn, ilerleme_fn=None, durdur_fn=None, tur_butcesi
         # kalitesi guvenilir sekilde korunur.
         en_temiz_sonuc = None
         en_temiz_skor = None
-        for _dene in range(3):
+        for _dene in range(4):
             ilk_veri = dict(veri)
             ilk_veri["seed"] = taban_seed + _dene * 104729
             ilk_veri["on_bos_gun_ata"] = False
-            ilk_veri["_deneme_butcesi_sn"] = min(45, sure_sn)
+            ilk_veri["_deneme_butcesi_sn"] = min(90, sure_sn)
             aday = _dagit_tek_deneme(ilk_veri)
             if aday.get("_butunluk_sorunu"):
                 continue

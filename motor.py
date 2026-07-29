@@ -2015,6 +2015,19 @@ def arka_plan_arama(veri, sure_sn, ilerleme_fn=None, durdur_fn=None, tur_butcesi
             ilk_veri["on_bos_gun_ata"] = False
             ilk_veri["_deneme_butcesi_sn"] = min(90, sure_sn)
             aday = _dagit_tek_deneme(ilk_veri)
+            # ARA ILERLEME BILDIRIMI: her deneme (90sn'ye kadar surebilir,
+            # 4 deneme = 6 dakikaya kadar) sonrasinda durumu gunceller -
+            # kullanicinin "hic ilerleme yok, donmus mu?" endisesine
+            # dogrudan cevap. Henuz KESIN en_iyi_sonuc belirlenmedi ama
+            # kullaniciya "bir sey oluyor" gostermek onemli.
+            if ilerleme_fn is not None and not aday.get("_butunluk_sorunu"):
+                try:
+                    _ara_skor = hesapla_skor(aday)
+                    _ara_bildirim = dict(aday)
+                    _ara_bildirim["_tur_no"] = 0
+                    ilerleme_fn(0, _ara_bildirim, _ara_skor, time.time() - t0)
+                except Exception:
+                    pass
             if aday.get("_butunluk_sorunu"):
                 continue
             # ONEMLI DUZELTME: ozel bir 'ihlal_toplam' hesabi yerine TAM
@@ -2054,7 +2067,7 @@ def arka_plan_arama(veri, sure_sn, ilerleme_fn=None, durdur_fn=None, tur_butcesi
             if _eksik_sayisi > 0 or ilk_ist.get("fazla_bos_gun_sayisi", 0) > 0 or ilk_ist.get("min_ihlal_sayisi", 0) > 0:
                 uyari = (f" - UYARI: checkpoint eksik={_eksik_sayisi} "
                          f"fazla_bosgun={ilk_ist.get('fazla_bos_gun_sayisi')} "
-                         f"min_ihlal={ilk_ist.get('min_ihlal_sayisi')} icermis olabilir (5 denemenin "
+                         f"min_ihlal={ilk_ist.get('min_ihlal_sayisi')} icermis olabilir (4 denemenin "
                          f"en temizi secildi), sonraki turlerde duzeltilmeye calisilacak")
             print(f"[KALDIGI YERDEN DEVAM] hazir baslangic yerlesimi yuklendi, "
                   f"Faz 1 (sifirdan kesif) atlaniyor{uyari}", flush=True)

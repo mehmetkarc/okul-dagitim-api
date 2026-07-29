@@ -244,15 +244,29 @@ def pencere_optimize_baslat():
         if not veri:
             return jsonify({"hata": "JSON verisi bulunamadi"}), 400
 
-        # Ayni anda sadece bir is calissin - sunucu kaynaklarini koru
+        # Ayni anda sadece bir is calissin - sunucu kaynaklarini koru.
+        # GUVENCE: eger bir is "calisiyor" durumunda gorunuyor ama kendi
+        # HEDEF suresini (+10 dakika tolerans) COK asmissa, bu is
+        # muhtemelen askida kalmistir (beklenmeyen bir hata/hang) - yeni
+        # bir baslatmayi SONSUZA KADAR engellemesin diye bu durumda
+        # ENGELLEYICI SAYILMAZ (arka planda calismaya devam etse bile
+        # zararsizdir, sadece yeni isler onu bloke etmez).
         with _isler_kilit:
-            for jid, kayit in _isler.items():
-                if kayit.get("durum") == "calisiyor":
-                    return jsonify({
-                        "hata": "Zaten calisan bir arka plan islemi var",
-                        "job_id": jid,
-                        "durum": "calisiyor",
-                    }), 409
+            for jid, kayit in list(_isler.items()):
+                if kayit.get("durum") != "calisiyor":
+                    continue
+                baslangic_zamani = kayit.get("baslangic", 0)
+                hedef = kayit.get("hedef_sn", 0)
+                gecen = time.time() - baslangic_zamani
+                if gecen > hedef + 600:
+                    print(f"[UYARI] is {jid} askida kalmis gibi gorunuyor "
+                          f"(gecen={gecen:.0f}s, hedef={hedef:.0f}s) - engelleyici sayilmiyor", flush=True)
+                    continue
+                return jsonify({
+                    "hata": "Zaten calisan bir arka plan islemi var",
+                    "job_id": jid,
+                    "durum": "calisiyor",
+                }), 409
 
         sure_dakika = float(veri.pop("_sure_dakika", 20))
         sure_sn = max(30, sure_dakika * 60)

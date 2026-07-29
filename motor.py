@@ -36,7 +36,7 @@ Cikti CP-SAT versiyonuyla AYNI:
 import time
 import random
 
-MOTOR_VERSIYON = "7.4.0-checkpoint-coklu-deneme"  # /saglik uzerinden dogrulanir
+MOTOR_VERSIYON = "7.5.0-checkpoint-pencere-korumasi"  # /saglik uzerinden dogrulanir
 
 
 def _dagit_tek_deneme(veri):
@@ -2008,22 +2008,34 @@ def arka_plan_arama(veri, sure_sn, ilerleme_fn=None, durdur_fn=None, tur_butcesi
         # olani baslangic noktasi olarak seciyoruz - boylece checkpoint'in
         # kalitesi guvenilir sekilde korunur.
         en_temiz_sonuc = None
-        en_temiz_ihlal_toplam = None
+        en_temiz_skor = None
         for _dene in range(3):
             ilk_veri = dict(veri)
             ilk_veri["seed"] = taban_seed + _dene * 104729
             ilk_veri["on_bos_gun_ata"] = False
-            ilk_veri["_deneme_butcesi_sn"] = min(8, sure_sn)
+            ilk_veri["_deneme_butcesi_sn"] = min(45, sure_sn)
             aday = _dagit_tek_deneme(ilk_veri)
             if aday.get("_butunluk_sorunu"):
                 continue
-            aday_ist = aday.get("istatistik", {})
-            ihlal_toplam = aday_ist.get("fazla_bos_gun_sayisi", 0) * 1000 + aday_ist.get("min_ihlal_sayisi", 0)
-            if en_temiz_ihlal_toplam is None or ihlal_toplam < en_temiz_ihlal_toplam:
+            # ONEMLI DUZELTME: ozel bir 'ihlal_toplam' hesabi yerine TAM
+            # hesapla_skor() tuple'i kullanilir - bu, eksik/fazla_bosgun/
+            # min_ihlal ONCELIGINI KORURKEN, ayni zamanda pencere_fazla/
+            # pencere_max/pencere_toplam kalitesini de dogru sekilde
+            # karsilastirir. Onceki surum SADECE mutlak kural ihlallerine
+            # bakiyordu, pencere kalitesini HIC KARSILASTIRMIYORDU - bu,
+            # 'Pencere Azalt tekrar basinca sayisi ARTIYOR' sikayetinin
+            # GERCEK kok nedeniydi: 5 'temiz' denemeden HERHANGI biri
+            # (ilk bulunani) seciliyordu, aralarinda EN IYI pencereli
+            # olanı degil.
+            aday_skor = hesapla_skor(aday)
+            if en_temiz_skor is None or aday_skor < en_temiz_skor:
                 en_temiz_sonuc = aday
-                en_temiz_ihlal_toplam = ihlal_toplam
-            if ihlal_toplam == 0:
-                break  # mukemmel temiz bulundu - daha fazla denemeye gerek yok
+                en_temiz_skor = aday_skor
+            # ONEMLI: erken cikis KALDIRILDI - "ilk temiz bulunani hemen
+            # kabul et" mantigi, PENCERE kalitesini hic karsilastirmadan
+            # sonucu belirliyordu (asil sikayetin kok nedeni). Artik TUM
+            # 5 deneme calisir, ARALARINDAN hesapla_skor'a gore EN IYISI
+            # (pencere dahil) secilir.
         ilk_sonuc = en_temiz_sonuc
         ilk_ist = ilk_sonuc.get("istatistik", {}) if ilk_sonuc else {}
         if ilk_sonuc is not None and not ilk_sonuc.get("_butunluk_sorunu"):
@@ -2038,9 +2050,11 @@ def arka_plan_arama(veri, sure_sn, ilerleme_fn=None, durdur_fn=None, tur_butcesi
                     pass
             FAZ1_TUR_SAYISI = 0  # kesif atlanir - direkt cilalamaya gec
             uyari = ""
-            if ilk_ist.get("fazla_bos_gun_sayisi", 0) > 0 or ilk_ist.get("min_ihlal_sayisi", 0) > 0:
-                uyari = (f" - UYARI: checkpoint fazla_bosgun={ilk_ist.get('fazla_bos_gun_sayisi')} "
-                         f"min_ihlal={ilk_ist.get('min_ihlal_sayisi')} icermis olabilir (3 denemenin "
+            _eksik_sayisi = len(ilk_sonuc.get("eksikler", []))
+            if _eksik_sayisi > 0 or ilk_ist.get("fazla_bos_gun_sayisi", 0) > 0 or ilk_ist.get("min_ihlal_sayisi", 0) > 0:
+                uyari = (f" - UYARI: checkpoint eksik={_eksik_sayisi} "
+                         f"fazla_bosgun={ilk_ist.get('fazla_bos_gun_sayisi')} "
+                         f"min_ihlal={ilk_ist.get('min_ihlal_sayisi')} icermis olabilir (5 denemenin "
                          f"en temizi secildi), sonraki turlerde duzeltilmeye calisilacak")
             print(f"[KALDIGI YERDEN DEVAM] hazir baslangic yerlesimi yuklendi, "
                   f"Faz 1 (sifirdan kesif) atlaniyor{uyari}", flush=True)

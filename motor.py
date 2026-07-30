@@ -36,7 +36,7 @@ Cikti CP-SAT versiyonuyla AYNI:
 import time
 import random
 
-MOTOR_VERSIYON = "7.7.0-her-turda-nabiz-guncellemesi"  # /saglik uzerinden dogrulanir
+MOTOR_VERSIYON = "7.8.0-temiz-checkpoint-koruma"  # /saglik uzerinden dogrulanir
 
 
 def _dagit_tek_deneme(veri):
@@ -437,6 +437,41 @@ def _dagit_tek_deneme(veri):
             if bos_gunler_simdi:
                 tc_kisit[tc]["bosGun"] = bos_gunler_simdi[0]
 
+    # BASLANGIC TEMIZLIK KONTROLU: 'kaldigi yerden devam' modunda
+    # (baslangic_yerlesim verilmis), yuklenen yerlesimin ZATEN gecerli
+    # (tek-ders/fazla-bos-gun ihlali OLMAYAN) olup olmadigini kontrol
+    # ederiz. Eger ZATEN TEMIZSE, asagidaki 'duzeltme' gecisleri
+    # (tek_ders_yasakla_pass, otomatik_bos_gun_pass, brans_takas_pass
+    # vb.) GEREKSIZ YERE calisip zaten iyi olan pencere durumunu
+    # bozabiliyordu - gercek loglar bunu kanitladi (temiz bir 35
+    # pencere_fazla checkpoint'i, bu gecislerden SONRA 44-55'e
+    # cikiyordu, zaman_takasi_pencere_pass HENUZ BASLAMADAN). Simdi
+    # ZATEN TEMIZSE bu gecisler ATLANIR - dogrudan pencere azaltmaya
+    # gecilir.
+    _baslangic_zaten_temiz = False
+    if baslangic_yerlesim:
+        _tek_ders_ihlali_var = False
+        _fazla_bos_gun_var = False
+        for tc in tum_tc:
+            if idareci_mi[tc]:
+                continue
+            _calisilan_saat_toplam = sum(day_load[tc].get(g, 0) for g in gunler)
+            if _calisilan_saat_toplam == 0:
+                continue
+            _min_saat = tc_kisit[tc].get("minGunlukSaat") or 2
+            for g in gunler:
+                _yuk = day_load[tc].get(g, 0)
+                if 0 < _yuk < _min_saat:
+                    _tek_ders_ihlali_var = True
+            _bos_gun_sayisi = sum(1 for g in gunler if day_load[tc].get(g, 0) == 0)
+            if _bos_gun_sayisi > 1:
+                _fazla_bos_gun_var = True
+            if _tek_ders_ihlali_var or _fazla_bos_gun_var:
+                break
+        _baslangic_zaten_temiz = not _tek_ders_ihlali_var and not _fazla_bos_gun_var
+        print(f"[BASLANGIC TEMIZLIK] zaten_temiz={_baslangic_zaten_temiz} "
+              f"(tek_ders_ihlali={_tek_ders_ihlali_var}, fazla_bos_gun={_fazla_bos_gun_var})", flush=True)
+
     # ---------------- 5. Yerlestirme + displacement ----------------
     # on_bos_gun_ata modunda butun ogretmenler bastan kisitli oldugundan
     # yerlestirme daha zor - biraz daha derin arama gerekiyor (4), ama 5
@@ -817,7 +852,8 @@ def _dagit_tek_deneme(veri):
             if not degisti:
                 break
 
-    tek_ders_yasakla_pass()
+    if not _baslangic_zaten_temiz:
+        tek_ders_yasakla_pass()
 
     # ---------------- 6b. Eksikleri tekrar dene (MUTLAK ONCELIK - digerlerinden ONCE) ----------------
     # 'Tum dersler yerlessin' kurali en kritik olandir. Bu adim ISTEGE BAGLI
@@ -875,7 +911,8 @@ def _dagit_tek_deneme(veri):
                     tc_kisit[tc]["bosGun"] = aday_gun  # KILITLE - sonraki gecisler (pencere/takas) asla dokunmasin
                     break  # basarili VE tek-ders kuralini bozmadi
 
-    otomatik_bos_gun_pass()
+    if not _baslangic_zaten_temiz:
+        otomatik_bos_gun_pass()
 
     # ---------------- 7b. Fazla bos gunu doldur (asla 2. bos gun kurali - MUTLAK) ----------------
     def fazla_bos_gun_konsolide_pass():
@@ -910,7 +947,8 @@ def _dagit_tek_deneme(veri):
             if not degisti:
                 break
 
-    fazla_bos_gun_konsolide_pass()
+    if not _baslangic_zaten_temiz:
+        fazla_bos_gun_konsolide_pass()
 
     def _takasi_uygula(gid1, gid2):
         g1, g2 = gid_map[gid1], gid_map[gid2]
@@ -1069,7 +1107,8 @@ def _dagit_tek_deneme(veri):
             if not degisti:
                 break
 
-    fazla_bos_gun_brans_takas_pass()
+    if not _baslangic_zaten_temiz:
+        fazla_bos_gun_brans_takas_pass()
 
     # ---------------- 7b2. Bos gun ALAMAYAN ogretmenler icin BRANS TAKASI ----------------
     # otomatik_bos_gun_pass sadece kovma/dogrudan-tasima dener - bu, o gunku
@@ -1125,10 +1164,12 @@ def _dagit_tek_deneme(veri):
             if not degisti:
                 break
 
-    otomatik_bos_gun_brans_takas_pass()
+    if not _baslangic_zaten_temiz:
+        otomatik_bos_gun_brans_takas_pass()
 
     # ---------------- 7c. Son tek-ders temizligi (bos gun gecisi yan etki yaratmis olabilir) ----------------
-    tek_ders_yasakla_pass()
+    if not _baslangic_zaten_temiz:
+        tek_ders_yasakla_pass()
 
     # ---------------- 8. Pencere minimizasyonu (hedef: haftalik <=2 pencere) ----------------
 

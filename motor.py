@@ -36,7 +36,7 @@ Cikti CP-SAT versiyonuyla AYNI:
 import time
 import random
 
-MOTOR_VERSIYON = "7.6.0-checkpoint-daha-fazla-deneme"  # /saglik uzerinden dogrulanir
+MOTOR_VERSIYON = "7.7.0-her-turda-nabiz-guncellemesi"  # /saglik uzerinden dogrulanir
 
 
 def _dagit_tek_deneme(veri):
@@ -2150,11 +2150,17 @@ def arka_plan_arama(veri, sure_sn, ilerleme_fn=None, durdur_fn=None, tur_butcesi
             en_iyi_sonuc["_gecen_sn"] = round(gecen, 1)
             if gelisti:
                 son_iyilesme_turu = tur_no  # takilma sayacini sifirla
-            if gelisti and ilerleme_fn is not None:
-                try:
-                    ilerleme_fn(tur_no, en_iyi_sonuc, en_iyi_skor, gecen)
-                except Exception:
-                    pass  # ilerleme bildirimi basarisiz olsa bile arama devam etmeli
+        # NABIZ GUNCELLEMESI: kullanicinin 'donma hissi' sikayeti uzerine,
+        # artik HER turda (iyilesme olsun olmasin) ilerleme_fn cagrilir -
+        # boylece 'Tur: X | Ysn' ekrandaki sayaclar HER ZAMAN ilerler,
+        # asla donmus gorunmez. Gosterilen ISTATISTIKLER (en_iyi_sonuc)
+        # ise HER ZAMAN gercek en iyi sonucu yansitir - bu turda iyilesme
+        # olmasa bile GERIYE GITMEZ, sadece sayaclar 'canli' kalir.
+        if ilerleme_fn is not None:
+            try:
+                ilerleme_fn(tur_no, en_iyi_sonuc, en_iyi_skor, gecen)
+            except Exception:
+                pass  # ilerleme bildirimi basarisiz olsa bile arama devam etmeli
         # skor kotuyse bu turun sonucu ATILIR - en_iyi_sonuc degismez, bir
         # sonraki tur YINE en_iyi_sonuc'un yerlesiminden devam eder (asla
         # geri gitmeyen, surekli ilerleyen bir arama).

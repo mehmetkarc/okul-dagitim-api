@@ -36,7 +36,7 @@ Cikti CP-SAT versiyonuyla AYNI:
 import time
 import random
 
-MOTOR_VERSIYON = "7.8.0-temiz-checkpoint-koruma"  # /saglik uzerinden dogrulanir
+MOTOR_VERSIYON = "7.9.0-eski-pencere-gecisi-atlandi"  # /saglik uzerinden dogrulanir
 
 
 def _dagit_tek_deneme(veri):
@@ -1396,7 +1396,18 @@ def _dagit_tek_deneme(veri):
             if not herhangi_degisti:
                 break
 
-    pencere_azalt_pass()
+    # KRITIK DUZELTME: pencere_azalt_pass (eski, KORUMASIZ gecis - 'kimse
+    # kotulesmesin' kontrolu YOK) 'kaldigi yerden devam' modunda ATLANIR.
+    # Gercek prod loglari kanitladi: checkpoint zaten_temiz=True olsa bile
+    # (yani onceki 6 gecis dogru sekilde atlansa bile), BU gecis hala
+    # temiz bir 35-pencere checkpoint'ini 45'e cikarabiliyordu - cunku bu
+    # eski mekanizma pencere degerini DUSURMEYE calisirken baska
+    # ogretmenleri KOTULESTIREBILIYOR, zaman_takasi_pencere_pass'in
+    # sahip oldugu global 'kimse kotulesmesin' korumasi bunda YOK. Artik
+    # devam modunda dogrudan KORUMALI zaman_takasi_pencere_pass'a
+    # birakiliyor.
+    if not baslangic_yerlesim:
+        pencere_azalt_pass()
     def zaman_takasi_pencere_pass():
         """En cok pencereli ogretmenden baslayarak, HERHANGI baska bir
         dersle (brans siniri OLMADAN) zaman takasi deneyerek pencereyi

@@ -36,7 +36,7 @@ Cikti CP-SAT versiyonuyla AYNI:
 import time
 import random
 
-MOTOR_VERSIYON = "7.9.0-eski-pencere-gecisi-atlandi"  # /saglik uzerinden dogrulanir
+MOTOR_VERSIYON = "8.0.0-kosullu-guvenlik-aglari"  # /saglik uzerinden dogrulanir
 
 
 def _dagit_tek_deneme(veri):
@@ -1730,9 +1730,17 @@ def _dagit_tek_deneme(veri):
     # tasirken (a) yeni bir tek-ders kalintisi biraktabilir, (b) kaynak
     # gunu tamamen bosaltip 2. bir bos gun yaratabilir. Her iki kural da
     # MUTLAK oldugundan burada sirayla son bir kez zorluyoruz.
-    tek_ders_yasakla_pass()
-    fazla_bos_gun_konsolide_pass()
-    tek_ders_yasakla_pass()  # konsolide de yeni tek-ders yaratmis olabilir
+    # KRITIK DUZELTME: bu gecisler artik SADECE gercekten bir ihlal VARSA
+    # calisiyor - onceden KOSULSUZ calisiyordu, ve gercek loglar bunun
+    # (zaman_takasi_pencere_pass 19'da bitmisken, buradan sonra final
+    # ciktinin 33'e cikmasi seklinde) pencereyi bozdugunu kanitladi -
+    # her ne kadar 'duzeltecek' bir sey OLMASA bile bu gecisler bir
+    # seyler degistiriyordu (belki de rastgelelik/tekrar-siralama
+    # nedeniyle). Artik ihlal yoksa HICBIR SEY yapilmiyor.
+    if ihlal_sayisi() > 0 or fazla_bos_gun_toplam() > 0:
+        tek_ders_yasakla_pass()
+        fazla_bos_gun_konsolide_pass()
+        tek_ders_yasakla_pass()  # konsolide de yeni tek-ders yaratmis olabilir
 
     # ---------------- 9. (eksik tekrar deneme adimi 6b'ye tasindi) ----------------
 
@@ -1813,13 +1821,23 @@ def _dagit_tek_deneme(veri):
             if not herhangi_degisti:
                 break
 
-    brans_takas_pass()
+    # AYNI DUZELTME: brans_takas_pass da (kendi ic korumasina RAGMEN,
+    # sadece tc1/tc2'yi kontrol eder - ek_tcler/coklu-ogretmen
+    # senaryolarinda ACIK OLABILIR) 'kaldigi yerden devam' modunda
+    # atlanir. Loglar, TEK BIR denemede zaman_takasi_pencere_pass 19'da
+    # bitmisken, bu noktadan SONRA (final cikti) 33'e ciktigini
+    # gosterdi - bu iki pass (brans_takas_pass, pencere_azalt_pass)
+    # zaman_takasi_pencere_pass'tan SONRA calisan TEK supheli adaylardi.
+    if not baslangic_yerlesim:
+        brans_takas_pass()
 
     # ---------------- 9c. Son guvenlik taramasi ----------------
-    tek_ders_yasakla_pass()
-    fazla_bos_gun_konsolide_pass()
-    fazla_bos_gun_brans_takas_pass()
-    tek_ders_yasakla_pass()
+    # AYNI DUZELTME: sadece gercekten bir ihlal varsa calisir.
+    if ihlal_sayisi() > 0 or fazla_bos_gun_toplam() > 0:
+        tek_ders_yasakla_pass()
+        fazla_bos_gun_konsolide_pass()
+        fazla_bos_gun_brans_takas_pass()
+        tek_ders_yasakla_pass()
 
     # ---------------- 9d. BUTUNLUK DOGRULAMASI (cakisma kontrolu) ----------------
     # baslangic_yerlesim (artimli devam) mekanizmasi HENUZ TAM guvenilir
@@ -1884,14 +1902,14 @@ def _dagit_tek_deneme(veri):
     # kuralinin ihlali) cikti goruldu - tum onceki gecisler kendi ic
     # kontrollerini yapsa da, COK SAYIDA gecisin (zaman-takasi, brans-
     # takasi, zincir rotasyonu) etkilesimi beklenmeyen bir yan etki
-    # yaratmis olabilir. Kok nedeni tam izole etmek yerine (zaman
-    # kisitli), en GUVENLI yol: CIKISTAN HEMEN ONCE, KOSULSUZ olarak bu
-    # iki MUTLAK kurali (asla tek ders, asla 2+ bos gun) bir kez daha
-    # zorlamak - boylece hangi ara gecis sorunu yaratirsa yaratsin,
-    # NIHAI CIKTI HER ZAMAN garantili sekilde kurallara uyar.
-    tek_ders_yasakla_pass()
-    fazla_bos_gun_konsolide_pass()
-    tek_ders_yasakla_pass()
+    # yaratmis olabilir. AYNI DUZELTME BURADA DA: sadece gercekten bir
+    # ihlal varsa calisir - once KOSULSUZDU ve bu, zaten temiz/iyi bir
+    # pencere durumunu (zaman_takasi_pencere_pass'in ozenle bulmus
+    # oldugu) gereksiz yere bozabiliyordu.
+    if ihlal_sayisi() > 0 or fazla_bos_gun_toplam() > 0:
+        tek_ders_yasakla_pass()
+        fazla_bos_gun_konsolide_pass()
+        tek_ders_yasakla_pass()
 
     # ---- Kalite istatistikleri (coklu-deneme sarmalayicisi icin) ----
     # NOT: idareci (2-12 saat) ogretmenler pencere ve fazla-bos-gun

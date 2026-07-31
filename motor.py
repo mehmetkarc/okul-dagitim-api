@@ -36,7 +36,7 @@ Cikti CP-SAT versiyonuyla AYNI:
 import time
 import random
 
-MOTOR_VERSIYON = "8.0.0-kosullu-guvenlik-aglari"  # /saglik uzerinden dogrulanir
+MOTOR_VERSIYON = "8.1.0-blok-yerlestirme-onceligi"  # /saglik uzerinden dogrulanir
 
 
 def _dagit_tek_deneme(veri):
@@ -304,8 +304,30 @@ def _dagit_tek_deneme(veri):
             ming = k["minG"]
             if ming and 0 < mevcut < ming:
                 s -= 8  # min saat altindaki gunu tamamlamaya oncelik ver
+            # BITISIKLIK (pencere minimizasyonu): eskiden -4 idi, artik
+            # COK DAHA GUCLU (-15) - kullanicinin gercek veriyle gosterdigi
+            # gibi (baska bir dagitim programinin ciktisi), bir ogretmenin
+            # dersleri GUN ICINDE BLOK halinde (bosluksuz) dizilebiliyorsa
+            # pencere sayisi COK dusuk kaliyor. Bizim onceki zayif bonusumuz
+            # bunu yeterince tercih etmiyordu.
             if (gun, saat - 1) in teacher_occ.get(tc, {}) or (gun, saat + boy) in teacher_occ.get(tc, {}):
-                s -= 4  # bitisiklik (pencere minimizasyonu icin)
+                s -= 15
+            elif mevcut == 0:
+                # GUN BASI/SONU TERCIHI: bu, o ogretmenin O GUNKU ILK
+                # dersi (henuz bitisik olacagi bir ders yok) - kullanicinin
+                # istegi uzerine, GUNUN EN BASINDAN (saat=1) veya EN
+                # SONUNDAN (saat = son mumkun saat) baslamasi tercih
+                # edilir - boylece o gun icinde SONRAKI derslerin dogal
+                # olarak bitisik eklenme sansi artar (ortada baslarsa,
+                # her iki yonde de bosluk riski olusur).
+                son_saat = gun_bilgi[gun] - boy + 1
+                if saat == 1 or saat == son_saat:
+                    s -= 6
+                else:
+                    # ortadan ne kadar uzaksa o kadar iyi (kenara yakin
+                    # olsun) - hafif bir egim, kesin bir kural degil
+                    merkeze_uzaklik = min(saat - 1, son_saat - saat)
+                    s += merkeze_uzaklik * 0.3
         s += rnd.random() * 0.5  # esitlik bozucu / cesitlilik
         return s
 

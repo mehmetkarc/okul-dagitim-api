@@ -273,6 +273,22 @@ def pencere_optimize_baslat():
         tur_butcesi_sn = int(veri.pop("_tur_butcesi_sn", 90))
         okul_kodu = veri.get("_okul_kodu") or "bilinmiyor"
 
+        # BELLEK SIZINTISI DUZELTMESI: _isler sozlugu HER "Pencere Azalt"
+        # tiklamasinda yeni bir kayit olusturuyordu ve HICBIRI ASLA
+        # silinmiyordu - her kayit buyuk veri (874 gorevlik slots +
+        # yerlesim_ham) icerdigi icin, saatler/gunler icinde bu birikip
+        # sunucunun bellek sinirini asmasina ve OTOMATIK YENIDEN
+        # BASLAMASINA yol aciyordu (kullanicinin bildirdigi Render
+        # e-postasi bunu dogruladi). Artik TAMAMLANMIS/DURDURULMUS/HATALI
+        # eski islerin BUYUK verisi (en_iyi_sonuc - slots/yerlesim_ham
+        # icerir) temizlenir, sadece kucuk ozet (en_iyi_ozet) tutulur -
+        # boylece "durum" sorgulama gecmisi calismaya devam eder ama
+        # bellek sisirilmez.
+        with _isler_kilit:
+            for _eski_jid, _eski_kayit in list(_isler.items()):
+                if _eski_kayit.get("durum") in ("tamamlandi", "durduruldu", "hata"):
+                    _eski_kayit["en_iyi_sonuc"] = None  # buyuk veriyi at, ozet kalsin
+
         job_id = str(uuid.uuid4())
         with _isler_kilit:
             _isler[job_id] = {

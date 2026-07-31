@@ -36,7 +36,7 @@ Cikti CP-SAT versiyonuyla AYNI:
 import time
 import random
 
-MOTOR_VERSIYON = "8.1.0-blok-yerlestirme-onceligi"  # /saglik uzerinden dogrulanir
+MOTOR_VERSIYON = "8.2.0-sifir-bosgun-kontrolu-eklendi"  # /saglik uzerinden dogrulanir
 
 
 def _dagit_tek_deneme(veri):
@@ -474,6 +474,7 @@ def _dagit_tek_deneme(veri):
     if baslangic_yerlesim:
         _tek_ders_ihlali_var = False
         _fazla_bos_gun_var = False
+        _sifir_bos_gun_var = False
         for tc in tum_tc:
             if idareci_mi[tc]:
                 continue
@@ -488,11 +489,21 @@ def _dagit_tek_deneme(veri):
             _bos_gun_sayisi = sum(1 for g in gunler if day_load[tc].get(g, 0) == 0)
             if _bos_gun_sayisi > 1:
                 _fazla_bos_gun_var = True
-            if _tek_ders_ihlali_var or _fazla_bos_gun_var:
+            # KRITIK DUZELTME: sifir_bos_gun (bu ogretmenin HIC bos gunu
+            # yok) durumu da kontrol edilir. Bu kontrol EKSIKTI - bu
+            # yuzden 'zaten_temiz=True' yanlislikla tetiklenip
+            # otomatik_bos_gun_pass (bos gun atama gecisi) atlaniyordu,
+            # gercek kullanimda 13 ogretmenin hic bos gun alamamasina
+            # yol acti.
+            if _bos_gun_sayisi == 0:
+                _sifir_bos_gun_var = True
+            if _tek_ders_ihlali_var or _fazla_bos_gun_var or _sifir_bos_gun_var:
                 break
-        _baslangic_zaten_temiz = not _tek_ders_ihlali_var and not _fazla_bos_gun_var
+        _baslangic_zaten_temiz = (not _tek_ders_ihlali_var and not _fazla_bos_gun_var
+                                   and not _sifir_bos_gun_var)
         print(f"[BASLANGIC TEMIZLIK] zaten_temiz={_baslangic_zaten_temiz} "
-              f"(tek_ders_ihlali={_tek_ders_ihlali_var}, fazla_bos_gun={_fazla_bos_gun_var})", flush=True)
+              f"(tek_ders_ihlali={_tek_ders_ihlali_var}, fazla_bos_gun={_fazla_bos_gun_var}, "
+              f"sifir_bos_gun={_sifir_bos_gun_var})", flush=True)
 
     # ---------------- 5. Yerlestirme + displacement ----------------
     # on_bos_gun_ata modunda butun ogretmenler bastan kisitli oldugundan

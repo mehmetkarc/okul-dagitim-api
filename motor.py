@@ -36,7 +36,7 @@ Cikti CP-SAT versiyonuyla AYNI:
 import time
 import random
 
-MOTOR_VERSIYON = "8.2.0-sifir-bosgun-kontrolu-eklendi"  # /saglik uzerinden dogrulanir
+MOTOR_VERSIYON = "8.3.0-bosgun-koruma-takaslarda"  # /saglik uzerinden dogrulanir
 
 
 def _dagit_tek_deneme(veri):
@@ -799,6 +799,23 @@ def _dagit_tek_deneme(veri):
                 n += 1
         return n
 
+    def sifir_bos_gun_toplam():
+        """Su anki toplam 'hic bos gunu olmayan' ogretmen sayisi (idareci
+        haric). KRITIK: fazla_bos_gun_toplam SADECE 2+ bos gunu (asiri)
+        kontrol ediyordu - bunun TAM TERSI olan durum (bir ogretmenin
+        TEK bos gununu KAYBETMESI, yani 1 bos gunden 0'a dusmesi) HICBIR
+        yerde kontrol edilmiyordu. Pencere-motivasyonlu takaslar bu
+        yuzden sessizce bir ogretmenin boş gununu doldurup 'BOS GUN YOK'
+        sayisini artirabiliyordu - kullanicinin bildirdigi 'boş gün
+        sayısı bir türlü düşmüyor' sikayetinin olasi nedeniydi."""
+        n = 0
+        for tc2 in tum_tc:
+            if idareci_mi[tc2]:
+                continue
+            if sum(1 for g2 in gunler if day_load[tc2][g2] == 0) == 0:
+                n += 1
+        return n
+
     # ---------------- 6. "Asla tek ders" garantisi (MUTLAK ONCELIK) ----------------
     def gunu_doldur(tc, gun, ming):
         """gun uzerindeki yuku, digerlerinden tasiyarak ming'e cikarmayi dener.
@@ -994,6 +1011,7 @@ def _dagit_tek_deneme(veri):
         ogrtler1_eski, ogrtler2_eski = g1["ogrtler"], g2["ogrtler"]
         once_ihlal = ihlal_sayisi()
         once_fazla = fazla_bos_gun_toplam()
+        once_sifir = sifir_bos_gun_toplam()
         nokta = kontrol_noktasi()
         bosalt(gid1)
         bosalt(gid2)
@@ -1002,7 +1020,8 @@ def _dagit_tek_deneme(veri):
         if musait_mi(gid1, gun1, saat1) and musait_mi(gid2, gun2, saat2):
             yerlestir(gid1, gun1, saat1)
             yerlestir(gid2, gun2, saat2)
-            if ihlal_sayisi() > once_ihlal or fazla_bos_gun_toplam() > once_fazla:
+            if (ihlal_sayisi() > once_ihlal or fazla_bos_gun_toplam() > once_fazla
+                    or sifir_bos_gun_toplam() > once_sifir):
                 g1["tc"], g2["tc"] = tc1_eski, tc2_eski
                 g1["ogrtler"], g2["ogrtler"] = ogrtler1_eski, ogrtler2_eski
                 geri_al(nokta)
@@ -1042,13 +1061,15 @@ def _dagit_tek_deneme(veri):
             return False
         once_ihlal = ihlal_sayisi()
         once_fazla = fazla_bos_gun_toplam()
+        once_sifir = sifir_bos_gun_toplam()
         nokta = kontrol_noktasi()
         bosalt(gid1)
         bosalt(gid2)
         if musait_mi(gid1, gun2, saat2) and musait_mi(gid2, gun1, saat1):
             yerlestir(gid1, gun2, saat2)
             yerlestir(gid2, gun1, saat1)
-            if ihlal_sayisi() > once_ihlal or fazla_bos_gun_toplam() > once_fazla:
+            if (ihlal_sayisi() > once_ihlal or fazla_bos_gun_toplam() > once_fazla
+                    or sifir_bos_gun_toplam() > once_sifir):
                 geri_al(nokta)
                 return False
             return True
@@ -1073,6 +1094,7 @@ def _dagit_tek_deneme(veri):
             return False  # ucu de farkli konumda olmali, aksi halde anlamsiz
         once_ihlal = ihlal_sayisi()
         once_fazla = fazla_bos_gun_toplam()
+        once_sifir = sifir_bos_gun_toplam()
         nokta = kontrol_noktasi()
         bosalt(gid1)
         bosalt(gid2)
@@ -1081,7 +1103,8 @@ def _dagit_tek_deneme(veri):
             yerlestir(gid1, *p2)
             yerlestir(gid2, *p3)
             yerlestir(gid3, *p1)
-            if ihlal_sayisi() > once_ihlal or fazla_bos_gun_toplam() > once_fazla:
+            if (ihlal_sayisi() > once_ihlal or fazla_bos_gun_toplam() > once_fazla
+                    or sifir_bos_gun_toplam() > once_sifir):
                 geri_al(nokta)
                 return False
             return True
@@ -1311,6 +1334,7 @@ def _dagit_tek_deneme(veri):
             return False  # tum konumlar birbirinden farkli olmali
         once_ihlal = ihlal_sayisi()
         once_fazla = fazla_bos_gun_toplam()
+        once_sifir = sifir_bos_gun_toplam()
         nokta = kontrol_noktasi()
         for gid in gid_listesi:
             bosalt(gid)
@@ -1320,7 +1344,8 @@ def _dagit_tek_deneme(veri):
         if hepsi_uygun:
             for i in range(n):
                 yerlestir(gid_listesi[i], *konumlar[(i + 1) % n])
-            if ihlal_sayisi() > once_ihlal or fazla_bos_gun_toplam() > once_fazla:
+            if (ihlal_sayisi() > once_ihlal or fazla_bos_gun_toplam() > once_fazla
+                    or sifir_bos_gun_toplam() > once_sifir):
                 geri_al(nokta)
                 return False
             return True

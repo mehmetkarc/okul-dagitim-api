@@ -36,7 +36,7 @@ Cikti CP-SAT versiyonuyla AYNI:
 import time
 import random
 
-MOTOR_VERSIYON = "8.3.0-bosgun-koruma-takaslarda"  # /saglik uzerinden dogrulanir
+MOTOR_VERSIYON = "8.4.0-gun-tuketme-onceligi-duzeltildi"  # /saglik uzerinden dogrulanir
 
 
 def _dagit_tek_deneme(veri):
@@ -300,33 +300,38 @@ def _dagit_tek_deneme(veri):
         if tc:
             k = tc_kisit[tc]
             mevcut = day_load[tc][gun]
-            if mevcut > 0:
-                s -= 5  # zaten kullanilan gunu tercih et (bos gun biriktirmek icin)
             ming = k["minG"]
-            if ming and 0 < mevcut < ming:
-                s -= 8  # min saat altindaki gunu tamamlamaya oncelik ver
-            # BITISIKLIK (pencere minimizasyonu): eskiden -4 idi, artik
-            # COK DAHA GUCLU (-15) - kullanicinin gercek veriyle gosterdigi
-            # gibi (baska bir dagitim programinin ciktisi), bir ogretmenin
-            # dersleri GUN ICINDE BLOK halinde (bosluksuz) dizilebiliyorsa
-            # pencere sayisi COK dusuk kaliyor. Bizim onceki zayif bonusumuz
-            # bunu yeterince tercih etmiyordu.
-            if (gun, saat - 1) in teacher_occ.get(tc, {}) or (gun, saat + boy) in teacher_occ.get(tc, {}):
-                s -= 15
-            elif mevcut == 0:
-                # GUN BASI/SONU TERCIHI: bu, o ogretmenin O GUNKU ILK
-                # dersi (henuz bitisik olacagi bir ders yok) - kullanicinin
-                # istegi uzerine, GUNUN EN BASINDAN (saat=1) veya EN
-                # SONUNDAN (saat = son mumkun saat) baslamasi tercih
-                # edilir - boylece o gun icinde SONRAKI derslerin dogal
-                # olarak bitisik eklenme sansi artar (ortada baslarsa,
-                # her iki yonde de bosluk riski olusur).
+            # ONEMLI DUZELTME: 'zaten kullanilan gunu tercih et' bonusu
+            # ESKIDEN (-5) 'yeni gun basi/sonu' bonusundan (-6) DAHA
+            # ZAYIFTI - bu, algoritmanin MEVCUT bir gunu kullanmak yerine
+            # YENI bir gun ACMAYI tercih etmesine yol aciyordu (cunku
+            # yeni gunun kenar konumu daha cazip gorunuyordu). Bu,
+            # ogretmenlerin derslerinin gereksiz yere DAHA FAZLA GUNE
+            # YAYILMASINA, dolayisiyla TAM BOS GUN bulmalarinin
+            # ZORLASMASINA sebep oluyordu - kullanicinin bildirdigi 'bos
+            # gun sayisi dusmuyor' regresyonunun kok nedeniydi. Artik
+            # MEVCUT GUNU KULLANMAK HER ZAMAN yeni gun acmaktan daha
+            # cazip - blok/kenar tercihleri SADECE hangi gunun
+            # kullanilacagini degil, O GUN ICINDE NEREYE konulacagini
+            # etkiler.
+            if mevcut > 0:
+                s -= 20  # mevcut gunu kullan - HER ZAMAN yeni gun acmaktan ONCELIKLI
+                if ming and mevcut < ming:
+                    s -= 8  # min saat altindaki gunu tamamlamaya oncelik ver
+                # BITISIKLIK: bu gun icinde, mevcut bir dersin TAM
+                # YANINA eklenirse EK bonus (pencere minimizasyonu).
+                if (gun, saat - 1) in teacher_occ.get(tc, {}) or (gun, saat + boy) in teacher_occ.get(tc, {}):
+                    s -= 8
+            else:
+                # YENI GUN: bu ogretmenin O GUNKU ILK dersi. Sadece
+                # MEVCUT gun secenegi YOKSA (yani baska yerlestirilecek
+                # uygun bir 'mevcut gun' slotu bulunamadiginda)
+                # kullanilir - bu durumda GUN BASI/SONU tercih edilir ki
+                # SONRAKI derslerin bitisik eklenme sansi artsin.
                 son_saat = gun_bilgi[gun] - boy + 1
                 if saat == 1 or saat == son_saat:
-                    s -= 6
+                    s -= 3
                 else:
-                    # ortadan ne kadar uzaksa o kadar iyi (kenara yakin
-                    # olsun) - hafif bir egim, kesin bir kural degil
                     merkeze_uzaklik = min(saat - 1, son_saat - saat)
                     s += merkeze_uzaklik * 0.3
         s += rnd.random() * 0.5  # esitlik bozucu / cesitlilik

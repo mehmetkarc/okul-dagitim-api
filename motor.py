@@ -36,7 +36,7 @@ Cikti CP-SAT versiyonuyla AYNI:
 import time
 import random
 
-MOTOR_VERSIYON = "8.4.0-gun-tuketme-onceligi-duzeltildi"  # /saglik uzerinden dogrulanir
+MOTOR_VERSIYON = "8.5.0-ming-alan-adi-duzeltmesi"  # /saglik uzerinden dogrulanir
 
 
 def _dagit_tek_deneme(veri):
@@ -487,11 +487,21 @@ def _dagit_tek_deneme(veri):
             _calisilan_saat_toplam = sum(day_load[tc].get(g, 0) for g in gunler)
             if _calisilan_saat_toplam == 0:
                 continue
-            _min_saat = tc_kisit[tc].get("minGunlukSaat") or 2
-            for g in gunler:
-                _yuk = day_load[tc].get(g, 0)
-                if 0 < _yuk < _min_saat:
-                    _tek_ders_ihlali_var = True
+            # KRITIK DUZELTME: yanlis alan adi kullaniliyordu
+            # ("minGunlukSaat" yerine dogrusu "minG") - bu yuzden BU
+            # kontrol HER ZAMAN varsayilan (2) kullaniyordu, ogretmenin
+            # GERCEK ayarina hic bakmiyordu. Resmi ihlal_sayisi()
+            # fonksiyonuyla AYNI mantik: minG tanimli DEGILSE (None/0),
+            # o ogretmen icin tek-ders ihlali ASLA sayilmaz (min-saat
+            # kurali o ogretmene uygulanmiyor demektir) - ama boş-gün
+            # kontrollerine (asagida) MUTLAKA devam edilir, bu yuzden
+            # 'continue' KULLANILMAZ, sadece tek-ders blogu atlanir.
+            _min_saat = tc_kisit[tc].get("minG")
+            if _min_saat:
+                for g in gunler:
+                    _yuk = day_load[tc].get(g, 0)
+                    if 0 < _yuk < _min_saat:
+                        _tek_ders_ihlali_var = True
             _bos_gun_sayisi = sum(1 for g in gunler if day_load[tc].get(g, 0) == 0)
             if _bos_gun_sayisi > 1:
                 _fazla_bos_gun_var = True

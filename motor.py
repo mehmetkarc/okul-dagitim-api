@@ -42,6 +42,7 @@ MOTOR_VERSIYON = "8.2.0-sifir-bosgun-kontrolu-eklendi"  # /saglik uzerinden dogr
 def _dagit_tek_deneme(veri):
     t0 = time.time()
     _deneme_butcesi = float(veri.get("_deneme_butcesi_sn", 70 if veri.get("on_bos_gun_ata") else 40))
+    _brans_takas_gecmisi = []  # kullaniciya "hangi takaslar yapildi" ozetlemek icin
 
     def _zaman_doldu():
         return time.time() - t0 > _deneme_butcesi
@@ -1006,6 +1007,17 @@ def _dagit_tek_deneme(veri):
                 g1["ogrtler"], g2["ogrtler"] = ogrtler1_eski, ogrtler2_eski
                 geri_al(nokta)
                 return False
+            # BASARILI BRANS TAKASI KAYDI: kullanicinin "hangi takaslar
+            # yapildi gorelim" istegi uzerine, her basarili takas
+            # (sinif, ders, eski/yeni ogretmen TC) burada kaydedilir -
+            # sonuc ile birlikte disari aktarilir, boylece "Uygula"
+            # oncesi kullaniciya ozetlenebilir.
+            _brans_takas_gecmisi.append({
+                "sid": g1.get("sid"), "did": g1.get("did"),
+                "sid2": g2.get("sid"), "did2": g2.get("did"),
+                "tc1_eski": tc1_eski, "tc1_yeni": tc2_eski,
+                "tc2_eski": tc2_eski, "tc2_yeni": tc1_eski,
+            })
             return True
         g1["tc"], g2["tc"] = tc1_eski, tc2_eski
         g1["ogrtler"], g2["ogrtler"] = ogrtler1_eski, ogrtler2_eski
@@ -1831,8 +1843,14 @@ def _dagit_tek_deneme(veri):
                                 # _takasi_uygula kendi ic transaction'ini
                                 # commit ettigi icin, tersini uygulayarak
                                 # (ayni iki gorevi tekrar takas ederek) geri
-                                # aliyoruz.
-                                _takasi_uygula(g1["id"], g2["id"])
+                                # aliyoruz. GERI ALMA da basarili sayilip
+                                # gecmise KAYDEDILDIGI icin (2 fantom kayit
+                                # - takas + geri alma), ikisini de temizleriz.
+                                if _takasi_uygula(g1["id"], g2["id"]):
+                                    if _brans_takas_gecmisi:
+                                        _brans_takas_gecmisi.pop()
+                                    if _brans_takas_gecmisi:
+                                        _brans_takas_gecmisi.pop()
         return False
 
     def brans_takas_pass():
@@ -1997,6 +2015,7 @@ def _dagit_tek_deneme(veri):
             "sure_sn": sure, "durum": durum, "seed": seed,
             "_yerlesim_ham": _yerlesim_ham,
             "_butunluk_sorunu": _butunluk_sorunu,
+            "_brans_takas_gecmisi": _brans_takas_gecmisi,
             "istatistik": {
                 "min_ihlal_sayisi": min_ihlal_sayisi,
                 "pencere_fazla_sayisi": pencere_fazla_sayisi,

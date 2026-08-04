@@ -37,7 +37,7 @@ import time
 import random
 import math
 
-MOTOR_VERSIYON = "9.2.0-esik-odakli-hedef"  # /saglik uzerinden dogrulanir
+MOTOR_VERSIYON = "9.3.0-karma-blok-takasi"  # /saglik uzerinden dogrulanir
 
 
 def _dagit_tek_deneme(veri):
@@ -1157,6 +1157,84 @@ def _dagit_tek_deneme(veri):
         geri_al(nokta)
         return False
 
+    def _zaman_takasi_karma_uygula(gid_buyuk, kucuk_idler):
+        """KARMA ZAMAN TAKASI: bir BUYUK blogu (orn. 2 saatlik Tarih),
+        BASKA bir gunde YAN YANA duran kucuk derslerle (orn. 1 saatlik
+        Saglik Bilgisi + 1 saatlik Rehberlik) yer degistirir.
+
+        MUTLAK GUVENLIK GARANTISI - BLOK ASLA BOLUNMEZ:
+        Bu fonksiyon hicbir gorevin "boy" (uzunluk) degerine DOKUNMAZ.
+        Buyuk blok, hedef zamana TEK PARCA halinde yerlesir; kucuk
+        dersler de kendi uzunluklarini KORUYARAK buyuk blogun bosalttigi
+        araliga sirayla dizilir. Yani 2'lik bir blok ASLA 1+1'e
+        bolunemez - bu, kodun yapisi geregi imkansizdir.
+
+        Neden gerekli: eski kod SADECE ayni uzunluktaki bloklarin takasina
+        izin veriyordu (g1["boy"] != g2["boy"] -> atla). Bu yuzden 1 saatlik
+        dersler (Rehberlik, Seclmeli Astronomi vb.) ile 2-4 saatlik bloklar
+        arasinda HIC KOPRU yoktu ve bazi pencereler asla doldurulamiyordu.
+        """
+        g_buyuk = gid_map[gid_buyuk]
+        kucukler = [gid_map[k] for k in kucuk_idler]
+        if not g_buyuk["placed"] or not kucukler:
+            return False
+        if any(not k["placed"] for k in kucukler):
+            return False
+        # Ayni gorev iki kez gecmesin, buyuk blok kucukler arasinda olmasin
+        tum_idler = [gid_buyuk] + list(kucuk_idler)
+        if len(set(tum_idler)) != len(tum_idler):
+            return False
+        # Toplam uzunluk BIREBIR esit olmali (aksi halde bosluk/tasma olur)
+        if sum(k["boy"] for k in kucukler) != g_buyuk["boy"]:
+            return False
+        gunB, saatB = g_buyuk["placed"]
+        gunK, saatK = kucukler[0]["placed"]
+        if (gunB, saatB) == (gunK, saatK):
+            return False
+        # Kucukler AYNI GUNDE ve KESINTISIZ (yan yana) olmali
+        beklenen = saatK
+        for k in kucukler:
+            if k["placed"] != (gunK, beklenen):
+                return False
+            beklenen += k["boy"]
+        # Buyuk blok ile kucuklerin araligi cakisiyorsa (ayni gun ve
+        # ic ice) takas anlamsiz/riskli - atla
+        if gunB == gunK and not (saatB + g_buyuk["boy"] <= saatK or saatK + g_buyuk["boy"] <= saatB):
+            return False
+
+        once_ihlal = ihlal_sayisi()
+        once_fazla = fazla_bos_gun_toplam()
+        once_sifir = sifir_bos_gun_toplam()
+        nokta = kontrol_noktasi()
+
+        bosalt(gid_buyuk)
+        for k in kucuk_idler:
+            bosalt(k)
+
+        # Buyuk blok TEK PARCA halinde kucuklerin bosalttigi yere
+        if not musait_mi(gid_buyuk, gunK, saatK):
+            geri_al(nokta)
+            return False
+        yerlestir(gid_buyuk, gunK, saatK)
+
+        # Kucukler, buyuk blogun bosalttigi araliga SIRAYLA (her biri
+        # kendi uzunlugunu koruyarak). Her adimda TEK TEK kontrol edilir -
+        # biri bile yerlesemezse TAMAMI geri alinir.
+        imlec = saatB
+        for k_id in kucuk_idler:
+            k = gid_map[k_id]
+            if not musait_mi(k_id, gunB, imlec):
+                geri_al(nokta)
+                return False
+            yerlestir(k_id, gunB, imlec)
+            imlec += k["boy"]
+
+        if (ihlal_sayisi() > once_ihlal or fazla_bos_gun_toplam() > once_fazla
+                or sifir_bos_gun_toplam() > once_sifir):
+            geri_al(nokta)
+            return False
+        return True
+
     def _zaman_rotasyon_uygula(gid1, gid2, gid3):
         """3'LU DONGUSEL zaman rotasyonu: g1->g2'nin eski yeri, g2->g3'un
         eski yeri, g3->g1'in eski yeri. Bazi durumlarda IKILI takas
@@ -1733,6 +1811,36 @@ def _dagit_tek_deneme(veri):
                     d.extend(range(sp, sp + g["boy"]))
                     tc_gorev_index.setdefault(otc, []).append(g)
 
+            def _yan_yana_kucukleri_topla(gun, saat, hedef_boy):
+                """(gun, saat)'ten baslayarak YAN YANA duran, toplam
+                uzunlugu TAM OLARAK hedef_boy eden kucuk dersleri toplar.
+                Orn. hedef_boy=2 icin: 1 saatlik Saglik Bilgisi + 1
+                saatlik Rehberlik. En az 2 ders olmali (tek ders zaten
+                esit-uzunluk yolundan denenmis olur). Tam eslesme yoksa
+                None doner - kismi/tasan eslesme ASLA kabul edilmez."""
+                toplanan = []
+                toplam = 0
+                imlec = saat
+                while toplam < hedef_boy:
+                    secilen = None
+                    for gid_i in zaman_index.get((gun, imlec), []):
+                        gg = gid_map[gid_i]
+                        # SADECE o saatte BASLAYAN ve hedeften KUCUK olan
+                        if gg["placed"] == (gun, imlec) and gg["boy"] < hedef_boy:
+                            secilen = gid_i
+                            break
+                    if secilen is None:
+                        return None
+                    gg = gid_map[secilen]
+                    if toplam + gg["boy"] > hedef_boy:
+                        return None  # tasma - blok bolunmesine yol acardi, ASLA
+                    toplanan.append(secilen)
+                    toplam += gg["boy"]
+                    imlec += gg["boy"]
+                if toplam != hedef_boy or len(toplanan) < 2:
+                    return None
+                return toplanan
+
             pencereli = sorted(
                 (tc for tc in tum_tc if not idareci_mi[tc] and _pencere_hizli(tc, ogrt_gun_index) > MAX_PENCERE_HEDEF),
                 key=lambda tc: -_pencere_hizli(tc, ogrt_gun_index))
@@ -1793,14 +1901,43 @@ def _dagit_tek_deneme(veri):
                             # bir iyilesme saglamayiz. Takastan ONCE bu
                             # ogretmen(ler)in mevcut pencere degerini
                             # kaydediyoruz, SONRA karsilastiracagiz.
-                            digerleri = [t for t in tum_ogrt(g2) if t != tc]
-                            once_digerleri = {t: _pencere_hizli(t, ogrt_gun_index) for t in digerleri}
+                            digerleri_dis = [t for t in tum_ogrt(g2) if t != tc]
                             for g1 in tc_tasklari:
+                                # KARMA TAKAS ENTEGRASYONU: eskiden farkli
+                                # uzunluktaki bloklar KOSULSUZ atlaniyordu
+                                # (g1["boy"] != g2["boy"] -> continue). Bu,
+                                # 1 saatlik dersler ile 2-4 saatlik bloklar
+                                # arasinda hic kopru birakmiyordu. Artik g1
+                                # DAHA BUYUKSE, hedef bosluktan baslayarak
+                                # YAN YANA duran kucuk dersler toplanip
+                                # BUTUN blok <-> kucukler takasi denenir.
+                                _karma_kucukler = None
                                 if g1["boy"] != g2["boy"]:
-                                    continue
+                                    if g1["boy"] > g2["boy"]:
+                                        _karma_kucukler = _yan_yana_kucukleri_topla(
+                                            bos_gun, bos_saat, g1["boy"])
+                                    if not _karma_kucukler:
+                                        continue
+                                    if g1["id"] in _karma_kucukler:
+                                        continue  # kendi gorevi - anlamsiz
+                                # Etkilenen "diger" ogretmenler: karma takasta
+                                # TUM kucuk derslerin ogretmenleri etkilenir.
+                                if _karma_kucukler:
+                                    _etkilenen = set()
+                                    for _kid in _karma_kucukler:
+                                        _etkilenen.update(tum_ogrt(gid_map[_kid]))
+                                    _etkilenen.discard(tc)
+                                    digerleri = sorted(_etkilenen)
+                                else:
+                                    digerleri = digerleri_dis
+                                once_digerleri = {t: _pencere_hizli(t, ogrt_gun_index) for t in digerleri}
                                 _deneme_sayaci += 1
                                 nokta = kontrol_noktasi()
-                                if _zaman_takasi_uygula(g1["id"], g2["id"]):
+                                _hamle_oldu = (
+                                    _zaman_takasi_karma_uygula(g1["id"], _karma_kucukler)
+                                    if _karma_kucukler else
+                                    _zaman_takasi_uygula(g1["id"], g2["id"]))
+                                if _hamle_oldu:
                                     # UCUZ HESAPLAMA: 874 gorevi TARAMADAN,
                                     # etkilenen ogretmenin KENDI (kucuk,
                                     # ~15-20 gorevlik) listesini CANLI
@@ -1890,6 +2027,16 @@ def _dagit_tek_deneme(veri):
                                         break
                                     else:
                                         geri_al(nokta)
+                                        # KARMA TAKAS reddedildiyse ZINCIRE
+                                        # GIRME: zincir mantigi butunuyle
+                                        # ESIT UZUNLUK varsayimina dayanir
+                                        # (adaylar_z filtresinde
+                                        # g_yeni["boy"] == g1["boy"]).
+                                        # Karma durumda g2 daha kucuk
+                                        # oldugu icin zincir anlamsiz olur;
+                                        # bir sonraki adaya gecilir.
+                                        if _karma_kucukler:
+                                            continue
                                         # IKILI TAKAS YETERSIZ KALDI - kullanicinin
                                         # istegi uzerine ZINCIRI 3, 4, 5, 6, 7, 8
                                         # UZUNLUGUNA KADAR genisleterek dene.

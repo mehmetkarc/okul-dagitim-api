@@ -1672,7 +1672,15 @@ def _dagit_tek_deneme(veri):
         def _sa_maliyet(p):
             if p <= MAX_PENCERE_HEDEF:
                 return 0  # 0, 1, 2 -> hepsi ESIT derecede iyi (kullanici boyle istedi)
-            return _SA_K + (p - MAX_PENCERE_HEDEF)  # esigi asan her saat ayrica cezalandirilir
+            # NOT (olculdu): esigi asan kismi KARESEL cezalandirmak
+            # denendi ("esite yakin olsun" kurali icin). Sonuc: en kotu
+            # ogretmenin penceresi dustu (max 9/11/11 -> 7/9/9) AMA asil
+            # hedef olan "pencere>2 olan ogretmen SAYISI" belirgin
+            # kotulesti (48/49/50 -> 55/62/53). Kullanicinin birincil
+            # onceligi TUM ogretmenlerin esik ALTINA inmesi oldugu icin
+            # DOGRUSAL ceza korundu. Outlier kontrolu zaten hesapla_skor
+            # icindeki 'pencere_max' olcutuyle saglaniyor.
+            return _SA_K + (p - MAX_PENCERE_HEDEF)
 
         def _sa_kaydet(fark_kabul):
             """Kabul edilen bir hamleden sonra kumulatifi guncelle ve

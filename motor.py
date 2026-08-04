@@ -37,7 +37,7 @@ import time
 import random
 import math
 
-MOTOR_VERSIYON = "9.3.0-karma-blok-takasi"  # /saglik uzerinden dogrulanir
+MOTOR_VERSIYON = "9.4.0-yik-yeniden-kur"  # /saglik uzerinden dogrulanir
 
 
 def _dagit_tek_deneme(veri):
@@ -2139,6 +2139,118 @@ def _dagit_tek_deneme(veri):
               f"en_iyi={_sa_en_iyi_kumulatif}] sure_kullanilan={round(time.time()-t0,1)}s/{_deneme_butcesi}s", flush=True)
 
     zaman_takasi_pencere_pass()
+
+    def yik_yeniden_kur_pass():
+        """RUIN & RECREATE (YIK-YENIDEN KUR) - BUYUK HAMLE MEKANIZMASI.
+
+        NEDEN GEREKLI: mevcut tum hamlelerimiz (ikili/3'lu/N'li zaman
+        takasi, brans takasi, karma blok takasi) KUCUK ve YEREL
+        hamlelerdir - cozumun etrafindaki dar bir komsulugu tararlar.
+        Gercek loglar gosterdi ki bu komsulugun icinde daha iyisi
+        KALMIYOR (net=-4 gibi kirinti kazanclar), yani arama dar bir
+        daireye hapsolmus durumda. Bu fonksiyon o daireyi KAT KAT
+        genisletir: en sorunlu birkac ogretmenin TUM derslerini programdan
+        CIKARIR (yik) ve greedy motorla SIFIRDAN yeniden yerlestirir
+        (yeniden kur). Tek adimda onlarca ders birden degisir - ikili
+        takasin ASLA ulasamayacagi bir mesafe.
+
+        MUTLAK GUVENLIK: her tur bir kontrol noktasiyla baslar. Yeniden
+        kurma sirasinda TEK BIR ders bile yerlesemezse, VEYA sonuc
+        maliyeti kotulesirse, VEYA mutlak kurallar (tek ders / 2+ bos gun
+        / bos gunsuz) kotulesirse -> TAMAMI GERI ALINIR. Yani bu pass
+        sonucu ASLA kotulestiremez, sadece iyilestirebilir.
+        """
+        nonlocal _deneme_butcesi
+        _yr_baslangic = time.time()
+        _yr_butce = min(25.0, max(8.0, _deneme_butcesi * 0.25))
+        # KRITIK: yerlestirmeye_calis(), GENEL butce dolduysa derinlik=0'da
+        # hemen False doner. Bu pass, SA pass'inden SONRA calistigi icin
+        # genel butce cogunlukla ZATEN DOLMUS olur - yani yeniden kurma
+        # HER ZAMAN basarisiz olur ve pass hicbir ise yaramazdi. Bu yuzden
+        # genel butceyi bu pass suresince GECICI olarak uzatiyoruz ve
+        # sonunda MUTLAKA eski degerine dondurulyoruz (finally).
+        _yr_eski_butce = _deneme_butcesi
+        _deneme_butcesi = (time.time() - t0) + _yr_butce + 2.0
+        try:
+            _yik_yeniden_kur_govde(_yr_baslangic, _yr_butce)
+        finally:
+            _deneme_butcesi = _yr_eski_butce
+
+    def _yik_yeniden_kur_govde(_yr_baslangic, _yr_butce):
+
+        def _yr_zaman_doldu():
+            return time.time() - _yr_baslangic > _yr_butce
+
+        def _global_pencere_maliyet():
+            m = 0
+            for tc2 in tum_tc:
+                if idareci_mi[tc2]:
+                    continue
+                p = ogrt_haftalik_pencere(tc2)
+                if p > MAX_PENCERE_HEDEF:
+                    m += 10 + (p - MAX_PENCERE_HEDEF)
+            return m
+
+        _basarili_yikim = 0
+        for _yr_tur in range(60):
+            if _yr_zaman_doldu():
+                break
+            adaylar = [tc2 for tc2 in tum_tc
+                       if not idareci_mi[tc2] and ogrt_haftalik_pencere(tc2) > MAX_PENCERE_HEDEF]
+            if not adaylar:
+                break
+            once_maliyet = _global_pencere_maliyet()
+            once_ihlal = (ihlal_sayisi(), fazla_bos_gun_toplam(), sifir_bos_gun_toplam())
+            nokta = kontrol_noktasi()
+
+            # YIK: en sorunlu ogretmenlerden rastgele bir alt kume sec
+            random.shuffle(adaylar)
+            secilen = adaylar[:min(len(adaylar), random.randint(2, 6))]
+            secilen_kume = set(secilen)
+            yikilan = []
+            yikilan_kume = set()
+            for g in gorevler:
+                if not g["placed"]:
+                    continue
+                if g["id"] in yikilan_kume:
+                    continue
+                if secilen_kume & set(tum_ogrt(g)):
+                    yikilan.append(g["id"])
+                    yikilan_kume.add(g["id"])
+            if not yikilan:
+                continue
+            for gid_y in yikilan:
+                bosalt(gid_y)
+
+            # YENIDEN KUR: buyuk bloklar once (yerlestirmesi daha zor)
+            yikilan.sort(key=lambda gid_y: -gid_map[gid_y]["boy"])
+            basarisiz = False
+            for gid_y in yikilan:
+                if _yr_zaman_doldu():
+                    basarisiz = True
+                    break
+                if not yerlestirmeye_calis(gid_y):
+                    basarisiz = True
+                    break
+
+            if basarisiz:
+                geri_al(nokta)
+                continue
+            sonra_ihlal = (ihlal_sayisi(), fazla_bos_gun_toplam(), sifir_bos_gun_toplam())
+            sonra_maliyet = _global_pencere_maliyet()
+            # KABUL SARTI: mutlak kurallar kotulesmeyecek VE pencere
+            # maliyeti KESIN iyilesecek (esitlik kabul edilmez - bosuna
+            # degisiklik yapip kararliligi bozmayalim).
+            if any(a > b for a, b in zip(sonra_ihlal, once_ihlal)) or sonra_maliyet >= once_maliyet:
+                geri_al(nokta)
+            else:
+                _basarili_yikim += 1
+
+        if _basarili_yikim:
+            print(f"[YIK-YENIDEN KUR] basarili_buyuk_hamle={_basarili_yikim} "
+                  f"sure={round(time.time()-_yr_baslangic,1)}s/{round(_yr_butce,1)}s", flush=True)
+
+    yik_yeniden_kur_pass()
 
 
     # ---------------- 8b. Son guvenlik agi: pencere/tek-ders gecisleri yan etki yaratmis olabilir ----------------

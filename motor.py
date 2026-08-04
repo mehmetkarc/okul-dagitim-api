@@ -36,7 +36,7 @@ Cikti CP-SAT versiyonuyla AYNI:
 import time
 import random
 
-MOTOR_VERSIYON = "8.6.0-cok-turlu-bosgun-atama"  # /saglik uzerinden dogrulanir
+MOTOR_VERSIYON = "8.7.0-izole-tek-ders-kurtarma"  # /saglik uzerinden dogrulanir
 
 
 def _dagit_tek_deneme(veri):
@@ -886,6 +886,41 @@ def _dagit_tek_deneme(veri):
                 geri_al(nokta)
         return degisti
 
+    def _izole_gorevi_tasi(tc, gun):
+        """gun'deki (0<yuk<ming ihlali olan) TUM gorevleri, GUNU TAMAMEN
+        BOSALTMAYA CALISMADAN, teker teker BASKA gunlere (kovma dahil)
+        tasimayi dener - hedef mutlaka 'bos gun' yaratmak degil, sadece
+        izole kalan kalintiyi dagitmaktir. gunu_tamamen_bosalt'tan farki:
+        o TUM gorevlerin AYNI ANDA basarili olmasini sart kosar (tek-basarisizlik
+        = tam geri alma); bu fonksiyon ise HERHANGI BIRINI tasiyabilirse
+        yeter (kismi basari bile ihlali cozebilir, cunku amac sadece
+        yuku minG UZERINE cikarmak veya SIFIRA indirmek)."""
+        tasklar = [g for g in gorevler if tc in tum_ogrt(g) and g["placed"] and g["placed"][0] == gun]
+        for t in tasklar:
+            if _zaman_doldu():
+                break
+            once = ihlal_sayisi()
+            nokta = kontrol_noktasi()
+            eski_gun, eski_saat = t["placed"]
+            bosalt(t["id"])
+            tasindi = False
+            aday = en_iyi_aday(t["id"], haric_gun=gun)
+            if aday:
+                yerlestir(t["id"], aday[0], aday[1])
+                tasindi = True
+            elif kovarak_yerlestir_haric(t["id"], haric_gun=gun):
+                tasindi = True
+            if tasindi and ihlal_sayisi() <= once and fazla_bos_gun_toplam() <= 0:
+                yeni_yuk = day_load[tc][gun]
+                if yeni_yuk == 0 or yeni_yuk >= (tc_kisit[tc]["minG"] or 0):
+                    return True  # ihlal cozuldu (gun ya bosaldi ya da esik ustune cikti)
+                continue  # hala ihlalli ama belki bir sonraki gorev tasininca duzelir
+            # basarisiz veya yeni sorun yarattı - geri al
+            if not (t["id"] in [x["id"] for x in gorevler if x["placed"]]):
+                pass
+            geri_al(nokta)
+        return day_load[tc][gun] == 0 or day_load[tc][gun] >= (tc_kisit[tc]["minG"] or 0)
+
     def tek_ders_yasakla_pass():
         """'Asla tek ders / gunde minGunlukSaat altinda ders olmasin' - BU
         KURAL COK ONEMLIDIR ama 'ASLA 2. BOS GUN YARATMA' kuralindan DAHA
@@ -914,6 +949,18 @@ def _dagit_tek_deneme(veri):
                     elif gunu_doldur_swap_ile(tc, gun, ming):
                         degisti = True
                     elif not ogrt_bos_gun_var_mi(tc) and gunu_tamamen_bosalt(tc, gun):
+                        degisti = True
+                    elif _izole_gorevi_tasi(tc, gun):
+                        # KRITIK EK YONTEM: ogretmenin ZATEN bir bos gunu
+                        # olsa bile (yukaridaki 'gunu_tamamen_bosalt'
+                        # bu yuzden atlansa bile), izole kalan 1-2
+                        # saatlik kalintiyi dogrudan BASKA (tercihen
+                        # zaten aktif) bir gune tasimayi dener - 2.
+                        # bos gun YARATMADAN. Kullanicinin gercek
+                        # verisinde bulunan 'Seçmeli Astronomi'/
+                        # 'Rehberlik' gibi 1 saatlik derslerin tek
+                        # basina bir gunde izole kalmasi sorununun
+                        # dogrudan cozumu budur.
                         degisti = True
             if not degisti:
                 break

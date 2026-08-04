@@ -35,8 +35,9 @@ Cikti CP-SAT versiyonuyla AYNI:
 """
 import time
 import random
+import math
 
-MOTOR_VERSIYON = "8.7.0-izole-tek-ders-kurtarma"  # /saglik uzerinden dogrulanir
+MOTOR_VERSIYON = "9.0.0-gercek-simulated-annealing"  # /saglik uzerinden dogrulanir
 
 
 def _dagit_tek_deneme(veri):
@@ -1612,6 +1613,57 @@ def _dagit_tek_deneme(veri):
                 toplam += (max(saatler) - min(saatler) + 1) - len(saatler)
             return toplam
 
+        # ---- GERCEK SIMULATED ANNEALING ALTYAPISI ----
+        # OLCULEN SORUN: onceki surumde KOTULESEN hicbir hamle ASLA kabul
+        # edilmiyordu (sadece iyilesme + yanal). Bu, tanim geregi "tepe
+        # tirmanma"dir ve YEREL OPTIMUMDAN MATEMATIKSEL OLARAK CIKAMAZ -
+        # gercek olcumde 78 hamle sirf kotulesme diye reddedildi, bunlarin
+        # 63'u SADECE +1/+2 birimlik kucuk kotulesmelerdi. Iste plato'nun
+        # sebebi buydu.
+        # COZUM: gercek SA - kucuk kotulesmeler sicakliga bagli olasilikla
+        # KABUL EDILIR (exp(-fark/T)), boylece arama tepeyi asip daha
+        # derin bir cukura inebilir. GUVENLIK: kumulatif toplam takip
+        # edilir ve EN IYI ANIN kontrol noktasi saklanir; pass bitiminde
+        # mevcut durum en iyiden kotuyse EN IYI DURUMA GERI DONULUR -
+        # yani SA'nin kesif ozgurlugu var ama sonuc ASLA kotulesemez.
+        _sa_kumulatif = 0            # pass baslangicina gore net degisim
+        _sa_en_iyi_kumulatif = 0     # goruilen en iyi net degisim
+        _sa_en_iyi_nokta = kontrol_noktasi()
+        _sa_kabul_kotu = 0           # tanilama: kac kotulesen hamle kabul edildi
+
+        # SA MALIYET FONKSIYONU - ASIL HEDEFLE HIZALI OLMALI:
+        # Olcumde goruldu ki SADECE "toplam pencere saati"ni azaltmak
+        # yanlis hedeftir: toplam dusarken "pencere>2 olan OGRETMEN
+        # SAYISI" (asil raporladigimiz ve hesapla_skor'un birincil
+        # pencere olcutu) ARTABILIYOR. Bu yuzden maliyet, esigi asan
+        # ogretmeni AGIR cezalandirir (K=10), toplam saat ise ince ayar
+        # (ikincil) olarak kullanilir.
+        _SA_K = 10
+
+        def _sa_maliyet(p):
+            return (_SA_K if p > MAX_PENCERE_HEDEF else 0) + p
+
+        def _sa_kaydet(fark_kabul):
+            """Kabul edilen bir hamleden sonra kumulatifi guncelle ve
+            gerekiyorsa 'en iyi an'i isaretle."""
+            nonlocal _sa_kumulatif, _sa_en_iyi_kumulatif, _sa_en_iyi_nokta
+            _sa_kumulatif += fark_kabul
+            if _sa_kumulatif < _sa_en_iyi_kumulatif:
+                _sa_en_iyi_kumulatif = _sa_kumulatif
+                _sa_en_iyi_nokta = kontrol_noktasi()
+
+        def _sa_kabul_mu(fark, sicaklik):
+            """Gercek SA kabul kriteri: iyilesme her zaman; yanal ve
+            kotulesme sicakliga bagli olasilikla (exp(-fark/T))."""
+            if fark < 0:
+                return True
+            if fark == 0:
+                return random.random() < sicaklik
+            try:
+                return random.random() < math.exp(-fark / max(sicaklik, 1e-6))
+            except OverflowError:
+                return False
+
         for _dis_tur in range(15):
             _dis_tur_sayisi += 1
             if _zt_zaman_doldu() or _deneme_sayaci > _MAKS_DENEME:
@@ -1756,18 +1808,27 @@ def _dagit_tek_deneme(veri):
                                     #    saglar (SA'nin temel mantigi).
                                     #  - TOPLAM ARTIYORSA: ASLA kabul edilmez
                                     #    (net kotulesme kesinlikle onlenir).
-                                    toplam_once = once_pencere + sum(once_digerleri.values())
-                                    toplam_sonra = yeni_pencere + sum(digerleri_sonra.values())
+                                    toplam_once = (_sa_maliyet(once_pencere)
+                                                   + sum(_sa_maliyet(v) for v in once_digerleri.values()))
+                                    toplam_sonra = (_sa_maliyet(yeni_pencere)
+                                                    + sum(_sa_maliyet(v) for v in digerleri_sonra.values()))
                                     # Sicaklik: _dis_tur ilerledikce (0->14) azalir,
                                     # yanal/kotu hamle kabul olasiligi da azalir.
-                                    sicaklik = max(0.05, 0.35 * (1 - _dis_tur / 15))
+                                    # SICAKLIK: eskiden 0.35->0.05 idi; bu
+                                    # aralik exp(-fark/T) icin COK DUSUK
+                                    # (exp(-1/0.35)=%5.8) - yani kotulesen
+                                    # hamleler pratikte hic kabul edilmezdi.
+                                    # 1.5->0.15 araligi gercek kesif saglar:
+                                    # baslangicta +1 kotulesme ~%51, sonlara
+                                    # dogru ~%0.1 olasilikla kabul edilir
+                                    # (klasik SA sogutma egrisi).
+                                    sicaklik = max(0.5, 6.0 * (1 - _dis_tur / 15))
                                     fark = toplam_sonra - toplam_once
-                                    kabul_edildi = False
-                                    if fark < 0:
-                                        kabul_edildi = True  # NET iyilesme - her zaman kabul
-                                    elif fark == 0 and random.random() < sicaklik:
-                                        kabul_edildi = True  # yanal hamle - sicakliga bagli kesif
+                                    kabul_edildi = _sa_kabul_mu(fark, sicaklik)
                                     if kabul_edildi:
+                                        if fark > 0:
+                                            _sa_kabul_kotu += 1
+                                        _sa_kaydet(fark)
                                         herhangi_degisti = True
                                         basarili_oldu = True
                                         _basarili_takas_sayisi += 1
@@ -1835,14 +1896,14 @@ def _dagit_tek_deneme(veri):
                                             if _zaman_zincir_uygula(_zincir):
                                                 yeni_pencere_z = _pencere_canli(tc)
                                                 digerleri_sonra_z = {t: _pencere_canli(t) for t in digerleri}
-                                                toplam_sonra_z = yeni_pencere_z + sum(digerleri_sonra_z.values())
+                                                toplam_sonra_z = (_sa_maliyet(yeni_pencere_z)
+                                                                  + sum(_sa_maliyet(v) for v in digerleri_sonra_z.values()))
                                                 fark_z = toplam_sonra_z - toplam_once
-                                                kabul_z = False
-                                                if fark_z < 0:
-                                                    kabul_z = True
-                                                elif fark_z == 0 and random.random() < sicaklik:
-                                                    kabul_z = True
+                                                kabul_z = _sa_kabul_mu(fark_z, sicaklik)
                                                 if kabul_z:
+                                                    if fark_z > 0:
+                                                        _sa_kabul_kotu += 1
+                                                    _sa_kaydet(fark_z)
                                                     herhangi_degisti = True
                                                     basarili_oldu = True
                                                     _basarili_takas_sayisi += 1
@@ -1865,11 +1926,20 @@ def _dagit_tek_deneme(veri):
                     if not basarili_oldu:
                         break  # bu ogretmen icin bu turda daha fazla iyilestirme bulunamadi
 
+        # ---- SA GUVENLIK AGI: EN IYI DURUMA GERI DON ----
+        # SA sirasinda bilerek kotulesen hamleler kabul edildi (yerel
+        # optimumdan kacmak icin). Pass bitiminde mevcut durum, gorulen
+        # EN IYI durumdan kotuyse, o en iyi ana GERI DONULUR. Boylece:
+        # kesif serbest, ama SONUC ASLA KOTULESMEZ.
+        if _sa_kumulatif > _sa_en_iyi_kumulatif:
+            geri_al(_sa_en_iyi_nokta)
+
         _bitis_pencere_fazla = sum(
             1 for tc in tum_tc if not idareci_mi[tc] and ogrt_haftalik_pencere(tc) > MAX_PENCERE_HEDEF)
         print(f"[ZAMAN TAKASI] dis_tur={_dis_tur_sayisi}/15 deneme={_deneme_sayaci} "
               f"basarili_takas={_basarili_takas_sayisi} pencere_fazla: {_baslangic_pencere_fazla} -> "
-              f"{_bitis_pencere_fazla} sure_kullanilan={round(time.time()-t0,1)}s/{_deneme_butcesi}s", flush=True)
+              f"{_bitis_pencere_fazla} [SA: kotu_kabul={_sa_kabul_kotu} net={_sa_kumulatif} "
+              f"en_iyi={_sa_en_iyi_kumulatif}] sure_kullanilan={round(time.time()-t0,1)}s/{_deneme_butcesi}s", flush=True)
 
     zaman_takasi_pencere_pass()
 

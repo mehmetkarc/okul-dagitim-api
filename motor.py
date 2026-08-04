@@ -37,7 +37,7 @@ import time
 import random
 import math
 
-MOTOR_VERSIYON = "9.1.0-zaman-bazli-sogutma"  # /saglik uzerinden dogrulanir
+MOTOR_VERSIYON = "9.2.0-esik-odakli-hedef"  # /saglik uzerinden dogrulanir
 
 
 def _dagit_tek_deneme(veri):
@@ -1658,17 +1658,21 @@ def _dagit_tek_deneme(veri):
         # ihlal vardir). Artik geri donus, ihlalleri ASLA artiramaz.
         _sa_en_iyi_ihlal = (ihlal_sayisi(), fazla_bos_gun_toplam(), sifir_bos_gun_toplam())
 
-        # SA MALIYET FONKSIYONU - ASIL HEDEFLE HIZALI OLMALI:
-        # Olcumde goruldu ki SADECE "toplam pencere saati"ni azaltmak
-        # yanlis hedeftir: toplam dusarken "pencere>2 olan OGRETMEN
-        # SAYISI" (asil raporladigimiz ve hesapla_skor'un birincil
-        # pencere olcutu) ARTABILIYOR. Bu yuzden maliyet, esigi asan
-        # ogretmeni AGIR cezalandirir (K=10), toplam saat ise ince ayar
-        # (ikincil) olarak kullanilir.
+        # SA MALIYET FONKSIYONU - KULLANICININ GERCEK HEDEFI:
+        # "80 ogretmenin 60'inin penceresi 0 olmasi DEGIL, 80'inin de
+        # 1 veya 2 olmasi onemli." Yani bir ogretmeni 2'den 0'a indirmek
+        # DEGERSIZDIR; 3'u 2'ye indirmek HER SEYDIR.
+        # Onceki surumde maliyet = (esik cezasi) + p idi; buradaki "+p"
+        # terimi, aramanin ZATEN HEDEFTE OLAN ogretmenleri 2'den 1'e,
+        # 1'den 0'a cekmek icin efor harcamasina yol aciyordu - bu efor
+        # tamamen bosa gidiyordu. Artik esik ALTINDAKI her durum EsIT
+        # maliyetlidir (0), ve sadece ESIGI ASAN kisim cezalandirilir.
         _SA_K = 10
 
         def _sa_maliyet(p):
-            return (_SA_K if p > MAX_PENCERE_HEDEF else 0) + p
+            if p <= MAX_PENCERE_HEDEF:
+                return 0  # 0, 1, 2 -> hepsi ESIT derecede iyi (kullanici boyle istedi)
+            return _SA_K + (p - MAX_PENCERE_HEDEF)  # esigi asan her saat ayrica cezalandirilir
 
         def _sa_kaydet(fark_kabul):
             """Kabul edilen bir hamleden sonra kumulatifi guncelle ve

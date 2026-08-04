@@ -36,7 +36,7 @@ Cikti CP-SAT versiyonuyla AYNI:
 import time
 import random
 
-MOTOR_VERSIYON = "8.5.0-ming-alan-adi-duzeltmesi"  # /saglik uzerinden dogrulanir
+MOTOR_VERSIYON = "8.6.0-cok-turlu-bosgun-atama"  # /saglik uzerinden dogrulanir
 
 
 def _dagit_tek_deneme(veri):
@@ -978,7 +978,25 @@ def _dagit_tek_deneme(veri):
                     break  # basarili VE tek-ders kuralini bozmadi
 
     if not _baslangic_zaten_temiz:
-        otomatik_bos_gun_pass()
+        # KRITIK IYILESTIRME: otomatik_bos_gun_pass eskiden SADECE BIR
+        # KEZ calisiyordu - bir ogretmenin basarili bos-gun atamasi,
+        # SIRADAKI ogretmenler icin musaitlik durumunu DEGISTIREBILIR
+        # (bazi hucreler bosalir, bazilari doluverir) - ama bu geri
+        # besleme hic kullanilmiyordu, "ilk turda basarisiz olan"
+        # ogretmen bir DAHA HIC denenmiyordu. Simdi pass, ilerleme
+        # OLDUGU surece (bir onceki turdan FARKLI sayida basarili olan
+        # varsa) tekrar calistirilir - boylece zincirleme firsatlar
+        # yakalanabilir. Kullanicinin "diger programlar bunu
+        # basariyorken bizimki neden basaramiyor" sorusunun olasi bir
+        # cevabi buydu.
+        for _bg_tur in range(4):
+            if _zaman_doldu():
+                break
+            _once_sifir = sum(1 for tc in tum_tc if not idareci_mi[tc] and not ogrt_bos_gun_var_mi(tc))
+            otomatik_bos_gun_pass()
+            _sonra_sifir = sum(1 for tc in tum_tc if not idareci_mi[tc] and not ogrt_bos_gun_var_mi(tc))
+            if _sonra_sifir >= _once_sifir:
+                break  # bu turda hic ilerleme olmadi, daha fazla denemek zaman kaybi
 
     # ---------------- 7b. Fazla bos gunu doldur (asla 2. bos gun kurali - MUTLAK) ----------------
     def fazla_bos_gun_konsolide_pass():

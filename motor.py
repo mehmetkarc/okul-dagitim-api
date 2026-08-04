@@ -37,7 +37,7 @@ import time
 import random
 import math
 
-MOTOR_VERSIYON = "9.0.0-gercek-simulated-annealing"  # /saglik uzerinden dogrulanir
+MOTOR_VERSIYON = "9.1.0-zaman-bazli-sogutma"  # /saglik uzerinden dogrulanir
 
 
 def _dagit_tek_deneme(veri):
@@ -1598,6 +1598,27 @@ def _dagit_tek_deneme(veri):
                 return False  # garanti sure dolmadi - genel butce dolmus olsa bile devam et
             return _zaman_doldu() or gecen_zt > 45  # garanti sonrasi normal kontrol + mutlak tavan (45sn)
 
+        # SA SOGUTMA TAKVIMI - ZAMANA BAGLI (tur sayisina DEGIL):
+        # KRITIK DUZELTME: sicaklik eskiden _dis_tur/15 ile hesaplaniyordu,
+        # ama gercek loglar gosterdi ki zaman butcesi yuzunden 15 dis
+        # turun ancak 2-4'u calisabiliyor - yani sicaklik 6.0'dan hicbir
+        # zaman ~4.4'un altina INMIYORDU. Sonuc: SA surekli "kesif"
+        # modunda kaliyor, hicbir zaman "yogunlasma" (exploit) asamasina
+        # gecemiyordu; bulunan iyi bolgeler derinlemesine islenmiyordu.
+        # Artik sogutma, pass'in GECEN ZAMAN ORANINA baglidir - kac tur
+        # calisirsa calissin, sicaklik 6.0'dan 0.3'e kadar TAM egriyi
+        # kat eder.
+        _zt_kalan = _deneme_butcesi - (time.time() - t0)
+        _zt_planlanan = max(_zt_garanti_sn, min(45.0, _zt_kalan))
+
+        def _sa_sicaklik():
+            ilerleme = (time.time() - _zt_baslangic) / max(_zt_planlanan, 1e-6)
+            if ilerleme < 0:
+                ilerleme = 0.0
+            elif ilerleme > 1:
+                ilerleme = 1.0
+            return max(0.3, 6.0 * (1 - ilerleme))
+
         def _pencere_hizli(tc, gun_index):
             """ogrt_haftalik_pencere ile AYNI sonucu verir ama 874 gorevi
             TARAMAZ - onceden kurulmus gun_index'ten O(gun_sayisi) okur.
@@ -1630,6 +1651,12 @@ def _dagit_tek_deneme(veri):
         _sa_en_iyi_kumulatif = 0     # goruilen en iyi net degisim
         _sa_en_iyi_nokta = kontrol_noktasi()
         _sa_kabul_kotu = 0           # tanilama: kac kotulesen hamle kabul edildi
+        # KRITIK: anlik goruntuye MUTLAK KURAL ihlalleri de kaydedilir.
+        # Olcumde goruldu ki sadece pencereye gore secilen bir "en iyi an"a
+        # geri donmek, fazla_bos_gun/tek_ders ihlallerini GERI GETIREBILIYOR
+        # (ihlaller zaman icinde azaldigi icin daha ESKI anlarda daha COK
+        # ihlal vardir). Artik geri donus, ihlalleri ASLA artiramaz.
+        _sa_en_iyi_ihlal = (ihlal_sayisi(), fazla_bos_gun_toplam(), sifir_bos_gun_toplam())
 
         # SA MALIYET FONKSIYONU - ASIL HEDEFLE HIZALI OLMALI:
         # Olcumde goruldu ki SADECE "toplam pencere saati"ni azaltmak
@@ -1646,11 +1673,12 @@ def _dagit_tek_deneme(veri):
         def _sa_kaydet(fark_kabul):
             """Kabul edilen bir hamleden sonra kumulatifi guncelle ve
             gerekiyorsa 'en iyi an'i isaretle."""
-            nonlocal _sa_kumulatif, _sa_en_iyi_kumulatif, _sa_en_iyi_nokta
+            nonlocal _sa_kumulatif, _sa_en_iyi_kumulatif, _sa_en_iyi_nokta, _sa_en_iyi_ihlal
             _sa_kumulatif += fark_kabul
             if _sa_kumulatif < _sa_en_iyi_kumulatif:
                 _sa_en_iyi_kumulatif = _sa_kumulatif
                 _sa_en_iyi_nokta = kontrol_noktasi()
+                _sa_en_iyi_ihlal = (ihlal_sayisi(), fazla_bos_gun_toplam(), sifir_bos_gun_toplam())
 
         def _sa_kabul_mu(fark, sicaklik):
             """Gercek SA kabul kriteri: iyilesme her zaman; yanal ve
@@ -1664,7 +1692,11 @@ def _dagit_tek_deneme(veri):
             except OverflowError:
                 return False
 
-        for _dis_tur in range(15):
+        # DIS TUR TAVANI: 15 -> 200. Bu yapay tavan, zaman butcesi HENUZ
+        # DOLMAMISKEN aramanin durmasina yol acabiliyordu. Zaten her turda
+        # _zt_zaman_doldu() kontrolu var, yani gercek sinir ZAMAN; bu tavan
+        # sadece sonsuz donguye karsi bir emniyet supabidir.
+        for _dis_tur in range(200):
             _dis_tur_sayisi += 1
             if _zt_zaman_doldu() or _deneme_sayaci > _MAKS_DENEME:
                 break
@@ -1822,7 +1854,7 @@ def _dagit_tek_deneme(veri):
                                     # baslangicta +1 kotulesme ~%51, sonlara
                                     # dogru ~%0.1 olasilikla kabul edilir
                                     # (klasik SA sogutma egrisi).
-                                    sicaklik = max(0.5, 6.0 * (1 - _dis_tur / 15))
+                                    sicaklik = _sa_sicaklik()
                                     fark = toplam_sonra - toplam_once
                                     kabul_edildi = _sa_kabul_mu(fark, sicaklik)
                                     if kabul_edildi:
@@ -1932,11 +1964,17 @@ def _dagit_tek_deneme(veri):
         # EN IYI durumdan kotuyse, o en iyi ana GERI DONULUR. Boylece:
         # kesif serbest, ama SONUC ASLA KOTULESMEZ.
         if _sa_kumulatif > _sa_en_iyi_kumulatif:
-            geri_al(_sa_en_iyi_nokta)
+            _simdiki_ihlal = (ihlal_sayisi(), fazla_bos_gun_toplam(), sifir_bos_gun_toplam())
+            # Geri donus SADECE mutlak kural ihlallerini ARTIRMIYORSA
+            # yapilir. Aksi halde pencere kazancindan vazgecilir - mutlak
+            # kurallar (tek ders / 2+ bos gun / bos gunsuz) HER ZAMAN
+            # pencereden onceliklidir.
+            if all(a <= b for a, b in zip(_sa_en_iyi_ihlal, _simdiki_ihlal)):
+                geri_al(_sa_en_iyi_nokta)
 
         _bitis_pencere_fazla = sum(
             1 for tc in tum_tc if not idareci_mi[tc] and ogrt_haftalik_pencere(tc) > MAX_PENCERE_HEDEF)
-        print(f"[ZAMAN TAKASI] dis_tur={_dis_tur_sayisi}/15 deneme={_deneme_sayaci} "
+        print(f"[ZAMAN TAKASI] dis_tur={_dis_tur_sayisi} deneme={_deneme_sayaci} "
               f"basarili_takas={_basarili_takas_sayisi} pencere_fazla: {_baslangic_pencere_fazla} -> "
               f"{_bitis_pencere_fazla} [SA: kotu_kabul={_sa_kabul_kotu} net={_sa_kumulatif} "
               f"en_iyi={_sa_en_iyi_kumulatif}] sure_kullanilan={round(time.time()-t0,1)}s/{_deneme_butcesi}s", flush=True)

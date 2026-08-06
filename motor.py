@@ -37,7 +37,15 @@ import time
 import random
 import math
 
-MOTOR_VERSIYON = "9.4.0-yik-yeniden-kur"  # /saglik uzerinden dogrulanir
+# OR-Tools CP-SAT OPSIYONEL: kurulu degilse motor ESKISI GIBI calisir.
+# Bu sayede mevcut calisan yapi HICBIR SEKILDE riske atilmaz - CP-SAT
+# sadece bir "ekstra iyilestirme katmani"dir.
+try:
+    from ortools.sat.python import cp_model as _cp_model
+except Exception:
+    _cp_model = None
+
+MOTOR_VERSIYON = "9.6.0-bosgun-maliyette"  # /saglik uzerinden dogrulanir
 
 
 def _dagit_tek_deneme(veri):
@@ -144,6 +152,12 @@ def _dagit_tek_deneme(veri):
             "maxG":   int(k["maxGunlukSaat"]) if k.get("maxGunlukSaat") else None,
             "brans":  (k.get("brans") or "").strip(),
             "unvan":  (k.get("unvan") or "").strip(),
+            # BOS GUN ISTEMEYEN OGRETMEN: bazi ogretmenler bos gun yerine
+            # derslerinin HAFTAYA DENGELI yayilmasini tercih eder. Bu
+            # ogretmenler bos gun atama gecislerinden ve "bos gunu yok"
+            # istatistiginden MUAF tutulur - ama pencere kurallari
+            # kendilerine AYNEN uygulanir (idareci muafiyetinden farki).
+            "bosGunIstemez": bool(k.get("bosGunIstemez")),
         }
     tc_kisit = {tc: kisit_al(tc) for tc in tum_tc}
 
@@ -180,7 +194,8 @@ def _dagit_tek_deneme(veri):
     # puan alir ve coklu-deneme baska bir stratejiyle (post-hoc kovma) devam
     # eder - "tum dersler yerlessin" kuralindan asla odun verilmez.
     if veri.get("on_bos_gun_ata"):
-        uygun_tc = [tc for tc in tum_tc if not idareci_mi[tc] and tc_kisit[tc]["bosGun"] is None]
+        uygun_tc = [tc for tc in tum_tc if not idareci_mi[tc]
+                    and not tc_kisit[tc]["bosGunIstemez"] and tc_kisit[tc]["bosGun"] is None]
         rnd.shuffle(uygun_tc)
         for i, tc in enumerate(uygun_tc):
             tc_kisit[tc]["bosGun"] = gunler[i % len(gunler)]
@@ -315,7 +330,21 @@ def _dagit_tek_deneme(veri):
             # cazip - blok/kenar tercihleri SADECE hangi gunun
             # kullanilacagini degil, O GUN ICINDE NEREYE konulacagini
             # etkiler.
-            if mevcut > 0:
+            if k["bosGunIstemez"]:
+                # DENGELI DAGILIM: bu ogretmen bos gun ISTEMIYOR, derslerinin
+                # haftaya esit yayilmasini istiyor. Bu yuzden "gun biriktir"
+                # mantigi TERSINE cevrilir: en AZ yuklu gun tercih edilir.
+                # AGIRLIK NOTU: bu ceza, asagidaki bitisiklik bonusundan (-8)
+                # BELIRGIN SEKILDE buyuk olmali. Aksi halde iki etki
+                # birbirini goturur ve gunlerden biri bos kalabiliyordu
+                # (gercek testte 16 saatlik ogretmen 0-4-4-4-4 dagildi,
+                # oysa 4-4-4-2-2 olmaliydi).
+                s += mevcut * 12         # gun ne kadar doluysa o kadar az cazip
+                if ming and 0 < mevcut < ming:
+                    s -= 10              # yine de tek-ders kalintisini topla
+                if (gun, saat - 1) in teacher_occ.get(tc, {}) or (gun, saat + boy) in teacher_occ.get(tc, {}):
+                    s -= 8               # gun icinde bitisik olsun (pencere)
+            elif mevcut > 0:
                 s -= 20  # mevcut gunu kullan - HER ZAMAN yeni gun acmaktan ONCELIKLI
                 if ming and mevcut < ming:
                     s -= 8  # min saat altindaki gunu tamamlamaya oncelik ver
@@ -460,7 +489,8 @@ def _dagit_tek_deneme(veri):
         # gunu koruma altinda olmadan doldurabilir - onceki turda kazanilan
         # bos gun sessizce kaybolur.
         for tc in tum_tc:
-            if idareci_mi[tc] or tc_kisit[tc]["bosGun"] is not None:
+            if (idareci_mi[tc] or tc_kisit[tc]["bosGunIstemez"]
+                    or tc_kisit[tc]["bosGun"] is not None):
                 continue
             bos_gunler_simdi = [g for g in gunler if day_load[tc][g] == 0]
             if bos_gunler_simdi:
@@ -828,6 +858,8 @@ def _dagit_tek_deneme(veri):
         for tc2 in tum_tc:
             if idareci_mi[tc2]:
                 continue
+            if tc_kisit[tc2]["bosGunIstemez"]:
+                continue      # bu ogretmen zaten bos gun ISTEMIYOR
             if sum(1 for g2 in gunler if day_load[tc2][g2] == 0) == 0:
                 n += 1
         return n
@@ -1003,7 +1035,8 @@ def _dagit_tek_deneme(veri):
         # ogretmenlerden basla (en cok ihtiyaci olanlar), esit yuklerde deneme
         # bazli (seed'e bagli) karistir - coklu deneme boylece farkli
         # kombinasyonlar kesfeder.
-        aday_tc_listesi = [tc for tc in tum_tc if not idareci_mi[tc] and tc_kisit[tc]["bosGun"] is None]
+        aday_tc_listesi = [tc for tc in tum_tc if not idareci_mi[tc]
+                           and not tc_kisit[tc]["bosGunIstemez"] and tc_kisit[tc]["bosGun"] is None]
         rnd.shuffle(aday_tc_listesi)
         aday_tc_listesi.sort(key=lambda tc: -sum(day_load[tc][g] for g in gunler))
         for tc in aday_tc_listesi:
@@ -1040,9 +1073,11 @@ def _dagit_tek_deneme(veri):
         for _bg_tur in range(4):
             if _zaman_doldu():
                 break
-            _once_sifir = sum(1 for tc in tum_tc if not idareci_mi[tc] and not ogrt_bos_gun_var_mi(tc))
+            _once_sifir = sum(1 for tc in tum_tc if not idareci_mi[tc]
+                              and not tc_kisit[tc]["bosGunIstemez"] and not ogrt_bos_gun_var_mi(tc))
             otomatik_bos_gun_pass()
-            _sonra_sifir = sum(1 for tc in tum_tc if not idareci_mi[tc] and not ogrt_bos_gun_var_mi(tc))
+            _sonra_sifir = sum(1 for tc in tum_tc if not idareci_mi[tc]
+                               and not tc_kisit[tc]["bosGunIstemez"] and not ogrt_bos_gun_var_mi(tc))
             if _sonra_sifir >= _once_sifir:
                 break  # bu turda hic ilerleme olmadi, daha fazla denemek zaman kaybi
 
@@ -1369,7 +1404,8 @@ def _dagit_tek_deneme(veri):
         for _tur in range(10):
             if _zaman_doldu():
                 break
-            hedefler = [tc for tc in tum_tc if not idareci_mi[tc] and tc_kisit[tc]["bosGun"] is None
+            hedefler = [tc for tc in tum_tc if not idareci_mi[tc]
+                        and not tc_kisit[tc]["bosGunIstemez"] and tc_kisit[tc]["bosGun"] is None
                         and not ogrt_bos_gun_var_mi(tc) and tc_kisit[tc]["brans"]]
             if not hedefler:
                 break
@@ -1746,6 +1782,11 @@ def _dagit_tek_deneme(veri):
         # tamamen bosa gidiyordu. Artik esik ALTINDAKI her durum EsIT
         # maliyetlidir (0), ve sadece ESIGI ASAN kisim cezalandirilir.
         _SA_K = 10
+        # BOS GUNSUZ ogretmen basina ceza. hesapla_skor'da bos gun
+        # PENCEREDEN ONCE geldigi icin agirlik cok yuksek tutuldu:
+        # boylece SA, birine bos gun kazandirmak icin pencerede kucuk
+        # bir kotulesmeyi GOZE ALIR.
+        _SA_BOSGUN = 150
 
         def _sa_maliyet(p):
             if p <= MAX_PENCERE_HEDEF:
@@ -1758,7 +1799,13 @@ def _dagit_tek_deneme(veri):
             # onceligi TUM ogretmenlerin esik ALTINA inmesi oldugu icin
             # DOGRUSAL ceza korundu. Outlier kontrolu zaten hesapla_skor
             # icindeki 'pencere_max' olcutuyle saglaniyor.
-            return _SA_K + (p - MAX_PENCERE_HEDEF)
+            asim = p - MAX_PENCERE_HEDEF
+            # NOT (IKI KEZ OLCULDU): karesel adalet terimi (asim*asim)
+            # denendi; en kotu ogretmenin penceresini dusuruyor AMA esigi
+            # asan ogretmen SAYISINI belirgin kotulestiriyor. Adalet
+            # zaten hesapla_skor icindeki 'pencere_max' olcutuyle
+            # korunuyor; bu yuzden DOGRUSAL ceza kaldi.
+            return _SA_K + asim
 
         def _sa_kaydet(fark_kabul):
             """Kabul edilen bir hamleden sonra kumulatifi guncelle ve
@@ -1841,9 +1888,23 @@ def _dagit_tek_deneme(veri):
                     return None
                 return toplanan
 
+            # HEDEF LISTESI: eskiden SADECE penceresi esigi asanlar
+            # taraniyordu. Penceresi olmayan ama BOS GUNU de OLMAYAN bir
+            # ogretmen bu donguye HIC girmiyordu - bu yuzden iyilestirme
+            # asamasinda bos gun sayisi bir turlu dusmuyordu. Artik iki
+            # sorunlu grup birlikte taranir.
+            def _bos_gunsuz_mu(tc2):
+                if idareci_mi[tc2] or tc_kisit[tc2]["bosGunIstemez"]:
+                    return False
+                gs = ogrt_gun_index.get(tc2) or {}
+                return all(gs.get(g) for g in gunler)
+
             pencereli = sorted(
-                (tc for tc in tum_tc if not idareci_mi[tc] and _pencere_hizli(tc, ogrt_gun_index) > MAX_PENCERE_HEDEF),
-                key=lambda tc: -_pencere_hizli(tc, ogrt_gun_index))
+                (tc for tc in tum_tc if not idareci_mi[tc]
+                 and (_pencere_hizli(tc, ogrt_gun_index) > MAX_PENCERE_HEDEF
+                      or _bos_gunsuz_mu(tc))),
+                key=lambda tc: -(_pencere_hizli(tc, ogrt_gun_index)
+                                 + (30 if _bos_gunsuz_mu(tc) else 0)))
             if not pencereli:
                 break
 
@@ -1931,6 +1992,7 @@ def _dagit_tek_deneme(veri):
                                 else:
                                     digerleri = digerleri_dis
                                 once_digerleri = {t: _pencere_hizli(t, ogrt_gun_index) for t in digerleri}
+                                _sa_sifir_once = sifir_bos_gun_toplam()
                                 _deneme_sayaci += 1
                                 nokta = kontrol_noktasi()
                                 _hamle_oldu = (
@@ -1990,9 +2052,11 @@ def _dagit_tek_deneme(veri):
                                     #  - TOPLAM ARTIYORSA: ASLA kabul edilmez
                                     #    (net kotulesme kesinlikle onlenir).
                                     toplam_once = (_sa_maliyet(once_pencere)
-                                                   + sum(_sa_maliyet(v) for v in once_digerleri.values()))
+                                                   + sum(_sa_maliyet(v) for v in once_digerleri.values())
+                                                   + _sa_sifir_once * _SA_BOSGUN)
                                     toplam_sonra = (_sa_maliyet(yeni_pencere)
-                                                    + sum(_sa_maliyet(v) for v in digerleri_sonra.values()))
+                                                    + sum(_sa_maliyet(v) for v in digerleri_sonra.values())
+                                                    + sifir_bos_gun_toplam() * _SA_BOSGUN)
                                     # Sicaklik: _dis_tur ilerledikce (0->14) azalir,
                                     # yanal/kotu hamle kabul olasiligi da azalir.
                                     # SICAKLIK: eskiden 0.35->0.05 idi; bu
@@ -2088,7 +2152,8 @@ def _dagit_tek_deneme(veri):
                                                 yeni_pencere_z = _pencere_canli(tc)
                                                 digerleri_sonra_z = {t: _pencere_canli(t) for t in digerleri}
                                                 toplam_sonra_z = (_sa_maliyet(yeni_pencere_z)
-                                                                  + sum(_sa_maliyet(v) for v in digerleri_sonra_z.values()))
+                                                                  + sum(_sa_maliyet(v) for v in digerleri_sonra_z.values())
+                                                                  + sifir_bos_gun_toplam() * _SA_BOSGUN)
                                                 fark_z = toplam_sonra_z - toplam_once
                                                 kabul_z = _sa_kabul_mu(fark_z, sicaklik)
                                                 if kabul_z:
@@ -2182,10 +2247,21 @@ def _dagit_tek_deneme(veri):
             return time.time() - _yr_baslangic > _yr_butce
 
         def _global_pencere_maliyet():
+            """KRITIK DUZELTME: bu maliyet eskiden SADECE pencereye
+            bakiyordu. Bos gun sayisi yalnizca bir 'kotulestirme bekcisi'
+            idi - yani arama hicbir zaman BILEREK birine bos gun
+            kazandirmaya calismiyordu. Sonuc: saatlerce calissa da bos
+            gunsuz ogretmen sayisi ancak sans eseri dusuyordu.
+            Artik bos gunsuz her ogretmen AGIR cezalidir (hesapla_skor'da
+            da pencereden ONCE geldigi icin agirlik buyuk tutuldu)."""
             m = 0
             for tc2 in tum_tc:
                 if idareci_mi[tc2]:
                     continue
+                if not tc_kisit[tc2]["bosGunIstemez"]:
+                    bos = sum(1 for g2 in gunler if day_load[tc2][g2] == 0)
+                    if bos == 0:
+                        m += 150          # bos gunu YOK - en agir ceza
                 p = ogrt_haftalik_pencere(tc2)
                 if p > MAX_PENCERE_HEDEF:
                     m += 10 + (p - MAX_PENCERE_HEDEF)
@@ -2251,6 +2327,277 @@ def _dagit_tek_deneme(veri):
                   f"sure={round(time.time()-_yr_baslangic,1)}s/{round(_yr_butce,1)}s", flush=True)
 
     yik_yeniden_kur_pass()
+
+    def cp_sat_pencere_pass():
+        """OR-TOOLS CP-SAT ile PENCERE ALT PROBLEMI COZUMU.
+
+        FIKIR: ogretmen-ders ATAMALARI SABIT kalir (kim neyi ogretiyor
+        degismez); sadece SORUNLU ogretmenlerin derslerinin ZAMANLARI
+        yeniden belirlenir. Bu, tum problemi degil KUCUK bir alt problemi
+        cozucuye verdigimiz icin CP-SAT'in gucunu (celiski ogrenme,
+        kanitlanmis optimallik) makul bir boyutta kullanmamizi saglar.
+
+        MUTLAK GUVENLIK:
+        - OR-Tools kurulu degilse SESSIZCE atlanir (motor eskisi gibi calisir)
+        - Herhangi bir hata olursa yakalanir ve mevcut cozum KORUNUR
+        - Cozucu sonucu, uygulanmadan once musait_mi ile TEK TEK dogrulanir
+        - Uygulama sonrasi maliyet/ihlaller kotulesirse TAMAMI GERI ALINIR
+        """
+        if _cp_model is None:
+            return
+        try:
+            _cp_sat_govde()
+        except Exception as _cp_hata:
+            print(f"[CP-SAT] atlandi (hata: {type(_cp_hata).__name__}: {_cp_hata})", flush=True)
+
+    def _cp_sat_govde():
+        hedef_tc = [tc2 for tc2 in tum_tc
+                    if not idareci_mi[tc2] and ogrt_haftalik_pencere(tc2) > MAX_PENCERE_HEDEF]
+        if not hedef_tc:
+            return
+        # EN SORUNLU ogretmenlere ODAKLAN: tum esik ustu ogretmenleri
+        # birden modele koymak, modeli cozucunun makul surede
+        # cozemeyecegi kadar buyutuyor (ve 400 ders sinirina takilip
+        # SESSIZCE atlaniyordu). En kotu N ogretmen secilerek problem
+        # CP-SAT'in gucunu gosterebilecegi bir boyutta tutulur.
+        hedef_tc.sort(key=lambda t2: -ogrt_haftalik_pencere(t2))
+        hedef_tc = hedef_tc[:12]
+        hedef_kume = set(hedef_tc)
+        # Serbest birakilacak gorevler: hedef ogretmenlerin TUM yerlesmis dersleri
+        serbest = [g for g in gorevler if g["placed"] and (hedef_kume & set(tum_ogrt(g)))]
+        if not serbest:
+            return
+        if len(serbest) > 400:
+            print(f"[CP-SAT] atlandi: model cok buyuk ({len(serbest)} ders)", flush=True)
+            return
+
+        serbest_idler = {g["id"] for g in serbest}
+        # Modele giren TUM ogretmenler (ortak derslerin ikinci ogretmenleri dahil)
+        model_tc = set()
+        for g in serbest:
+            model_tc.update(tum_ogrt(g))
+        model_tc = sorted(t for t in model_tc if not idareci_mi[t])
+
+        # DONMUS (frozen) doluluk: serbest OLMAYAN derslerin isgal ettigi hucreler
+        donmus_sinif = set()   # (sid, gun, saat)
+        donmus_ogrt = set()    # (tc, gun, saat)
+        for g in gorevler:
+            if not g["placed"] or g["id"] in serbest_idler:
+                continue
+            gp, sp = g["placed"]
+            for b in range(g["boy"]):
+                donmus_sinif.add((g["sid"], gp, sp + b))
+                for t2 in tum_ogrt(g):
+                    donmus_ogrt.add((t2, gp, sp + b))
+
+        # ADAY SLOTLAR
+        adaylar = {}
+        for g in serbest:
+            liste = []
+            for gun in gunler:
+                for saat in range(1, gun_bilgi[gun] - g["boy"] + 2):
+                    uygun = True
+                    for b in range(g["boy"]):
+                        h = saat + b
+                        if (g["sid"], gun, h) in donmus_sinif:
+                            uygun = False
+                            break
+                        for t2 in tum_ogrt(g):
+                            if (t2, gun, h) in donmus_ogrt:
+                                uygun = False
+                                break
+                            if (gun, h) in tc_kisit[t2]["kapaliSaat"]:
+                                uygun = False
+                                break
+                        if not uygun:
+                            break
+                    if uygun:
+                        liste.append((gun, saat))
+            if not liste:
+                print(f"[CP-SAT] atlandi: bir ders icin uygun slot yok (sinif={g['sid']})", flush=True)
+                return  # bir ders icin hic aday yoksa modeli kurma
+            adaylar[g["id"]] = liste
+
+        model = _cp_model.CpModel()
+        x = {}
+        for g in serbest:
+            for (gun, saat) in adaylar[g["id"]]:
+                x[(g["id"], gun, saat)] = model.NewBoolVar(f"x_{g['id']}_{gun}_{saat}")
+            model.AddExactlyOne([x[(g["id"], gun, saat)] for (gun, saat) in adaylar[g["id"]]])
+
+        # SINIF cakismasi: bir sinif ayni saatte tek ders
+        sinif_hucre = {}
+        for g in serbest:
+            for (gun, saat) in adaylar[g["id"]]:
+                for b in range(g["boy"]):
+                    sinif_hucre.setdefault((g["sid"], gun, saat + b), []).append(
+                        x[(g["id"], gun, saat)])
+        for _k, degiskenler in sinif_hucre.items():
+            if len(degiskenler) > 1:
+                model.AddAtMostOne(degiskenler)
+
+        # OGRETMEN cakismasi + doluluk degiskenleri
+        ogrt_hucre = {}
+        for g in serbest:
+            for (gun, saat) in adaylar[g["id"]]:
+                for b in range(g["boy"]):
+                    for t2 in tum_ogrt(g):
+                        ogrt_hucre.setdefault((t2, gun, saat + b), []).append(
+                            x[(g["id"], gun, saat)])
+        occ = {}
+        for t2 in model_tc:
+            for gun in gunler:
+                for h in range(1, gun_bilgi[gun] + 1):
+                    v = model.NewBoolVar(f"occ_{t2}_{gun}_{h}")
+                    # KRITIK DUZELTME: bu ogretmenin DONDURULMUS (serbest
+                    # birakilmamis) dersleri de doluluga dahil edilmeli.
+                    # Aksi halde ortak dersi olan / bir kismi donmus
+                    # ogretmenlerin gun yuku EKSIK sayiliyor ve "tam 1 bos
+                    # gun" / "min gunluk saat" kurallari IMKANSIZ hale
+                    # gelip model INFEASIBLE donuyordu.
+                    if (t2, gun, h) in donmus_ogrt:
+                        model.Add(v == 1)
+                        occ[(t2, gun, h)] = v
+                        continue
+                    degiskenler = ogrt_hucre.get((t2, gun, h), [])
+                    if degiskenler:
+                        model.AddAtMostOne(degiskenler)
+                        model.Add(v == sum(degiskenler))
+                    else:
+                        model.Add(v == 0)
+                    occ[(t2, gun, h)] = v
+
+        # AYNI DERS AYNI GUN iki kez olmasin
+        ders_gun = {}
+        for g in serbest:
+            for (gun, saat) in adaylar[g["id"]]:
+                ders_gun.setdefault((g["sid"], g["did"], gun), []).append(x[(g["id"], gun, saat)])
+        for _k, degiskenler in ders_gun.items():
+            if len(degiskenler) > 1:
+                model.AddAtMostOne(degiskenler)
+
+        # GUNLUK KURALLAR: min/max saat + TAM 1 BOS GUN
+        gun_kullanildi = {}
+        _bos_gun_cezalari = []
+        for t2 in model_tc:
+            ming = tc_kisit[t2]["minG"] or 0
+            maxg = tc_kisit[t2]["maxG"] or 8
+            for gun in gunler:
+                saat_toplam = sum(occ[(t2, gun, h)] for h in range(1, gun_bilgi[gun] + 1))
+                y = model.NewBoolVar(f"y_{t2}_{gun}")
+                gun_kullanildi[(t2, gun)] = y
+                model.Add(saat_toplam <= maxg)
+                model.Add(saat_toplam <= gun_bilgi[gun] * y)
+                if ming:
+                    model.Add(saat_toplam >= ming * y)  # ASLA TEK DERS
+                else:
+                    model.Add(saat_toplam >= y)
+            # BOS GUN: "2+ bos gun ASLA" kurali HARD kalir (MEB mutlak
+            # kurali). Ancak "en az 1 bos gun" HARD yapilirsa, mevcut
+            # cozumde bos gunu OLMAYAN ogretmenler yuzunden model
+            # komple INFEASIBLE oluyordu. Bu yuzden o kisim AMAC
+            # FONKSIYONUNA (agir cezayla) tasindi - cozucu bulabilirse
+            # bos gun verir, bulamazsa en azindan pencereyi iyilestirir.
+            model.Add(sum(gun_kullanildi[(t2, gun)] for gun in gunler) >= len(gunler) - 1)
+            _bos_gun_yok = model.NewBoolVar(f"bosgunyok_{t2}")
+            model.Add(sum(gun_kullanildi[(t2, gun)] for gun in gunler) == len(gunler)).OnlyEnforceIf(_bos_gun_yok)
+            model.Add(sum(gun_kullanildi[(t2, gun)] for gun in gunler) <= len(gunler) - 1).OnlyEnforceIf(_bos_gun_yok.Not())
+            _bos_gun_cezalari.append(_bos_gun_yok)
+
+        # PENCERE MODELI: bir saat "pencere"dir <=> dolu degil AMA
+        # oncesinde ve sonrasinda dolu saat var.
+        pencere_degiskenleri = {}
+        for t2 in model_tc:
+            for gun in gunler:
+                H = gun_bilgi[gun]
+                for h in range(2, H):
+                    onceki = [occ[(t2, gun, k)] for k in range(1, h)]
+                    sonraki = [occ[(t2, gun, k)] for k in range(h + 1, H + 1)]
+                    if not onceki or not sonraki:
+                        continue
+                    once_var = model.NewBoolVar(f"o_{t2}_{gun}_{h}")
+                    model.AddMaxEquality(once_var, onceki)
+                    sonra_var = model.NewBoolVar(f"s_{t2}_{gun}_{h}")
+                    model.AddMaxEquality(sonra_var, sonraki)
+                    bosluk = model.NewBoolVar(f"p_{t2}_{gun}_{h}")
+                    model.AddBoolAnd([once_var, sonra_var, occ[(t2, gun, h)].Not()]).OnlyEnforceIf(bosluk)
+                    model.AddBoolOr([once_var.Not(), sonra_var.Not(), occ[(t2, gun, h)]]).OnlyEnforceIf(bosluk.Not())
+                    pencere_degiskenleri.setdefault(t2, []).append(bosluk)
+
+        # AMAC: kullanicinin hedefi -> esigi ASAN ogretmen sayisini
+        # minimize et (agir ceza), ikincil olarak toplam pencere.
+        amac = []
+        for t2 in model_tc:
+            plist = pencere_degiskenleri.get(t2, [])
+            if not plist:
+                continue
+            toplam_p = model.NewIntVar(0, len(plist), f"w_{t2}")
+            model.Add(toplam_p == sum(plist))
+            asiyor = model.NewBoolVar(f"asiyor_{t2}")
+            model.Add(toplam_p >= MAX_PENCERE_HEDEF + 1).OnlyEnforceIf(asiyor)
+            model.Add(toplam_p <= MAX_PENCERE_HEDEF).OnlyEnforceIf(asiyor.Not())
+            amac.append(20 * asiyor)
+            amac.append(toplam_p)
+        # BOS GUNSUZ ogretmen basina AGIR ceza (mutlak kurala yakin agirlik)
+        for _bg in _bos_gun_cezalari:
+            amac.append(50 * _bg)
+        if not amac:
+            return
+        model.Minimize(sum(amac))
+
+        cozucu = _cp_model.CpSolver()
+        _cp_butce = min(30.0, max(10.0, _deneme_butcesi * 0.3))
+        cozucu.parameters.max_time_in_seconds = _cp_butce
+        cozucu.parameters.num_search_workers = 2
+        durum = cozucu.Solve(model)
+        if durum not in (_cp_model.OPTIMAL, _cp_model.FEASIBLE):
+            print(f"[CP-SAT] cozum bulunamadi (durum={cozucu.StatusName(durum)}) - mevcut cozum korunuyor", flush=True)
+            return
+
+        # UYGULA (tam geri alma korumasiyla)
+        once_ihlal = (ihlal_sayisi(), fazla_bos_gun_toplam(), sifir_bos_gun_toplam())
+        once_fazla_sayi = sum(1 for t2 in tum_tc
+                              if not idareci_mi[t2] and ogrt_haftalik_pencere(t2) > MAX_PENCERE_HEDEF)
+        nokta = kontrol_noktasi()
+        for g in serbest:
+            bosalt(g["id"])
+        basarisiz = False
+        for g in serbest:
+            hedef_slot = None
+            for (gun, saat) in adaylar[g["id"]]:
+                if cozucu.Value(x[(g["id"], gun, saat)]):
+                    hedef_slot = (gun, saat)
+                    break
+            if hedef_slot is None or not musait_mi(g["id"], hedef_slot[0], hedef_slot[1]):
+                basarisiz = True
+                break
+            yerlestir(g["id"], hedef_slot[0], hedef_slot[1])
+        if basarisiz:
+            geri_al(nokta)
+            print("[CP-SAT] cozum uygulanamadi - mevcut cozum korunuyor", flush=True)
+            return
+        sonra_ihlal = (ihlal_sayisi(), fazla_bos_gun_toplam(), sifir_bos_gun_toplam())
+        sonra_fazla_sayi = sum(1 for t2 in tum_tc
+                               if not idareci_mi[t2] and ogrt_haftalik_pencere(t2) > MAX_PENCERE_HEDEF)
+        if any(a > b for a, b in zip(sonra_ihlal, once_ihlal)) or sonra_fazla_sayi > once_fazla_sayi:
+            geri_al(nokta)
+            print(f"[CP-SAT] sonuc kotu ({once_fazla_sayi}->{sonra_fazla_sayi}) - GERI ALINDI", flush=True)
+            return
+        print(f"[CP-SAT] BASARILI: pencere_fazla {once_fazla_sayi} -> {sonra_fazla_sayi} "
+              f"({cozucu.StatusName(durum)}, {round(cozucu.WallTime(),1)}s, {len(serbest)} ders)", flush=True)
+
+    # CP-SAT VARSAYILAN OLARAK KAPALI.
+    # OLCUM SONUCU (3 tohum): kazanc YOK. Cozucu optimalligi 0.1 saniyede
+    # kanitladi - model zor oldugu icin degil, HAREKET ALANI OLMADIGI
+    # icin. Sinif programlari %100 dolu oldugundan, diger tum dersler
+    # dondurulunca serbest birakilan derslerin gidebilecegi bos yer
+    # neredeyse kalmiyor. Daha guclu bir formulasyon (hedef ogretmenlerin
+    # girdigi TUM siniflarin derslerini birlikte serbest birakmak)
+    # gerekir; bu ayri ve buyuk bir calisma konusudur.
+    # Denemek isteyen: asagidaki degeri True yapmak yeterli.
+    CP_SAT_AKTIF = False
+    if CP_SAT_AKTIF:
+        cp_sat_pencere_pass()
 
 
     # ---------------- 8b. Son guvenlik agi: pencere/tek-ders gecisleri yan etki yaratmis olabilir ----------------
@@ -2480,6 +2827,8 @@ def _dagit_tek_deneme(veri):
             "idareci": idareci_mi[tc],
             "pencere": ogrt_haftalik_pencere(tc) if not idareci_mi[tc] else 0,
             "bos_gun_sayisi": bos_gun_sayisi,
+            "bos_gun_istemez": tc_kisit[tc]["bosGunIstemez"],
+            "gunluk_yuk": [day_load[tc][g] for g in gunler],
         })
     ogretmen_raporu.sort(key=lambda r: -r["pencere"])
 

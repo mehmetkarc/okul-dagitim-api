@@ -45,7 +45,7 @@ try:
 except Exception:
     _cp_model = None
 
-MOTOR_VERSIYON = "9.6.0-bosgun-maliyette"  # /saglik uzerinden dogrulanir
+MOTOR_VERSIYON = "9.7.0-adalet-dengesi"  # /saglik uzerinden dogrulanir
 
 
 def _dagit_tek_deneme(veri):
@@ -1781,7 +1781,7 @@ def _dagit_tek_deneme(veri):
         # 1'den 0'a cekmek icin efor harcamasina yol aciyordu - bu efor
         # tamamen bosa gidiyordu. Artik esik ALTINDAKI her durum EsIT
         # maliyetlidir (0), ve sadece ESIGI ASAN kisim cezalandirilir.
-        _SA_K = 10
+        _SA_K = 50
         # BOS GUNSUZ ogretmen basina ceza. hesapla_skor'da bos gun
         # PENCEREDEN ONCE geldigi icin agirlik cok yuksek tutuldu:
         # boylece SA, birine bos gun kazandirmak icin pencerede kucuk
@@ -1800,12 +1800,25 @@ def _dagit_tek_deneme(veri):
             # DOGRUSAL ceza korundu. Outlier kontrolu zaten hesapla_skor
             # icindeki 'pencere_max' olcutuyle saglaniyor.
             asim = p - MAX_PENCERE_HEDEF
-            # NOT (IKI KEZ OLCULDU): karesel adalet terimi (asim*asim)
-            # denendi; en kotu ogretmenin penceresini dusuruyor AMA esigi
-            # asan ogretmen SAYISINI belirgin kotulestiriyor. Adalet
-            # zaten hesapla_skor icindeki 'pencere_max' olcutuyle
-            # korunuyor; bu yuzden DOGRUSAL ceza kaldi.
-            return _SA_K + asim
+            # NOT (IKI KEZ OLCULDU): TAM karesel ceza (asim*asim) denendi;
+            # en kotu ogretmeni duzeltiyor AMA esigi asan KISI SAYISINI
+            # belirgin kotulestiriyor - alindi.
+            # UC DEGER SINIRI: bunun yerine sadece ASIRI durumlar (5'ten
+            # fazla pencere) agir cezalandirilir. Kullanicinin acik
+            # istegi: "bir ogretmende 10 pencere birikmesindense herkese
+            # 2'ser dagilsin". 3-4 pencere hafif cezali kalir, boylece
+            # kisi sayisi optimizasyonu BOZULMAZ.
+            # ILKELI DENGE (iki olcumun ardindan):
+            #  * _SA_K (esigi GECME sabiti) BUYUK tutulur -> "esigi asan
+            #    KISI SAYISI" birincil hedef olarak kalir.
+            #  * asim^2 (karesel) terim -> tek bir ogretmende pencere
+            #    BIRIKMESINI ezer; adalet saglanir.
+            # Onceki denemede K=10 idi ve kare terimi sabiti bastiriyordu,
+            # bu yuzden kisi sayisi bozuluyordu. K=50 ile ikisi bir arada
+            # calisir: 1 kisiyi esik altina indirmek (50) her zaman
+            # 1 saatlik asim azaltmasindan (2*asim+1) daha degerlidir,
+            # asim 24'e kadar.
+            return _SA_K + asim * asim
 
         def _sa_kaydet(fark_kabul):
             """Kabul edilen bir hamleden sonra kumulatifi guncelle ve
